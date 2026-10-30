@@ -136,7 +136,7 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 
 ## Docker
 
-- Multi-stage build：`maven:3.9-eclipse-temurin-25` → `eclipse-temurin:25-jre`。
+- Multi-stage build：`maven:3.10-eclipse-temurin-25` → `eclipse-temurin:25-jre`。
 - ENTRYPOINT 帶 `-XX:MaxRAMPercentage=40`，保留空間給 `docker compose exec` 啟動的 TUI JVM（預設 25%）。不使用 `JAVA_TOOL_OPTIONS`，避免 JVM 在 TUI 畫面印出 "Picked up" 訊息。
 - `HEALTHCHECK` 以 bash `/dev/tcp` 呼叫 `/health`。
 - JAR manifest 含 `Enable-Native-Access: ALL-UNNAMED`（sqlite-jdbc 載入 native library）。
