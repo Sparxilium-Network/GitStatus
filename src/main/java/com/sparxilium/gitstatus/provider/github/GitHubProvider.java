@@ -131,6 +131,23 @@ public class GitHubProvider implements GitProvider {
         return out;
     }
 
+    /**
+     * Source IP ranges GitHub sends webhooks from ({@code hooks} in {@code GET /meta}).
+     * Authenticated with an installation token when one is given, because the unauthenticated
+     * limit (60/h per IP) is easily exhausted on shared egress IPs.
+     *
+     * @param installationId any installation of this App, or null for an unauthenticated call
+     */
+    public List<String> hookCidrs(String installationId) {
+        String token = installationId != null && configured() ? installationToken(installationId) : null;
+        List<String> out = new ArrayList<>();
+        getJson(settings.githubApiUrl() + "/meta", token).path("hooks").forEach(n -> out.add(n.asString()));
+        if (out.isEmpty()) {
+            throw new ProviderException("GitHub /meta returned no hook ranges");
+        }
+        return out;
+    }
+
     private static Availability availability(JsonNode permissions, Set<String> events, String permission, String event) {
         String level = permissions.path(permission).asString("");
         if (!level.equals("read") && !level.equals("write")) {
@@ -211,12 +228,15 @@ public class GitHubProvider implements GitProvider {
     }
 
     private static HttpRequest.Builder baseRequest(String url, String bearer) {
-        return HttpRequest.newBuilder(URI.create(url))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(20))
                 .header("Accept", "application/vnd.github+json")
                 .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("User-Agent", "gitstatus-notifier")
-                .header("Authorization", "Bearer " + bearer);
+                .header("User-Agent", "gitstatus-notifier");
+        if (bearer != null) {
+            builder.header("Authorization", "Bearer " + bearer);
+        }
+        return builder;
     }
 
     private HttpResponse<String> send(HttpRequest request) {

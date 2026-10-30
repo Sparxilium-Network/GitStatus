@@ -19,6 +19,7 @@ import com.sparxilium.gitstatus.db.ConfigStore;
 import com.sparxilium.gitstatus.notify.DiscordGateway;
 import com.sparxilium.gitstatus.notify.NotificationDispatcher;
 import com.sparxilium.gitstatus.provider.WebhookAdapter;
+import com.sparxilium.gitstatus.provider.github.GitHubHookSources;
 import com.sparxilium.gitstatus.routing.RuleSetHolder;
 import com.sparxilium.gitstatus.webhook.WebhookService;
 
@@ -50,10 +51,11 @@ public class DaemonConfig {
     }
 
     @Bean
-    public WebhookService webhookService(List<WebhookAdapter> adapters, RuleSetHolder rules, NotificationDispatcher dispatcher) {
+    public WebhookService webhookService(List<WebhookAdapter> adapters, RuleSetHolder rules, NotificationDispatcher dispatcher,
+                                         GitHubHookSources sources) {
         Map<String, WebhookAdapter> byProvider = adapters.stream()
                 .collect(Collectors.toMap(WebhookAdapter::provider, Function.identity()));
-        return new WebhookService(byProvider::get, store, rules::current, dispatcher);
+        return new WebhookService(byProvider::get, store, rules::current, dispatcher, sources);
     }
 
     @EventListener(ApplicationReadyEvent.class)

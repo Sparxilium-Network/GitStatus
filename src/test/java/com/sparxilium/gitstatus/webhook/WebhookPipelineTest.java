@@ -33,6 +33,7 @@ import com.sparxilium.gitstatus.model.Records.RepositoryRecord;
 import com.sparxilium.gitstatus.notify.DiscordMessage;
 import com.sparxilium.gitstatus.notify.DiscordSender;
 import com.sparxilium.gitstatus.notify.NotificationDispatcher;
+import com.sparxilium.gitstatus.provider.github.GitHubHookSources;
 import com.sparxilium.gitstatus.provider.github.GitHubWebhookAdapter;
 import com.sparxilium.gitstatus.routing.RuleSetHolder;
 import com.sparxilium.gitstatus.routing.RuleSetLoader;
@@ -49,6 +50,8 @@ class WebhookPipelineTest {
     private RuleSetHolder holder;
     private WebhookService service;
     private NotificationDispatcher dispatcher;
+    private SourceVerifier sources = SourceVerifier.ALLOW_ALL;
+    private String clientIp = "127.0.0.1";
     private final List<Sent> sent = new CopyOnWriteArrayList<>();
     private DiscordDestination build;
     private DiscordDestination alerts;
@@ -72,7 +75,8 @@ class WebhookPipelineTest {
         DiscordSender sender = (d, m) -> sent.add(new Sent(d.name(), m));
         dispatcher = new NotificationDispatcher(sender, store, 100, 2, 10);
         GitHubWebhookAdapter adapter = new GitHubWebhookAdapterFactory().create(SECRET);
-        service = new WebhookService(p -> "github".equals(p) ? adapter : null, store, holder::current, dispatcher);
+        service = new WebhookService(p -> "github".equals(p) ? adapter : null, store, holder::current, dispatcher,
+                (p, ip) -> sources.allowed(p, ip));
 
         // configuration as the TUI would write it
         store.syncInstallations("github", List.of(new DiscoveredInstallation("7", "acme", "Organization",
@@ -102,7 +106,44 @@ class WebhookPipelineTest {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         Map<String, String> h = new java.util.HashMap<>(Map.of("x-github-event", event, "x-github-delivery", delivery,
                 "content-type", "application/json", "x-hub-signature-256", sign(secret, bytes)));
-        return service.handle("github", h, bytes, "127.0.0.1");
+        return service.handle("github", h, bytes, clientIp);
+    }
+
+    @Test
+    void rejectsSourceOutsideGitHubHookRanges() throws Exception {
+        sources = new GitHubHookSources(() -> List.of("192.30.252.0/22", "2a0a:a440::/29"), store, true);
+        ((GitHubHookSources) sources).afterPropertiesSet();
+
+        clientIp = "203.0.113.7";
+        assertEquals(403, deliver("push", "s-1", PUSH, SECRET).status());
+        awaitSent(0);
+        assertTrue(sent.isEmpty());
+
+        // a rejected source is not recorded, so the real delivery with the same id still works
+        clientIp = "192.30.252.10";
+        assertEquals(202, deliver("push", "s-1", PUSH, SECRET).status());
+        awaitSent(1);
+        assertEquals(1, sent.size());
+    }
+
+    @Test
+    void sourceVerificationFailsClosedAndKeepsSavedRanges() throws Exception {
+        clientIp = "192.30.252.10";
+        GitHubHookSources unreachable = new GitHubHookSources(() -> {
+            throw new IllegalStateException("GitHub down");
+        }, store, true);
+        unreachable.afterPropertiesSet();
+        sources = unreachable;
+        assertEquals(403, deliver("push", "s-2", PUSH, SECRET).status()); // no list ever loaded
+
+        new GitHubHookSources(() -> List.of("192.30.252.0/22"), store, true).afterPropertiesSet(); // saves the list
+        GitHubHookSources restarted = new GitHubHookSources(() -> {
+            throw new IllegalStateException("GitHub down");
+        }, store, true);
+        restarted.afterPropertiesSet();
+        sources = restarted;
+        assertEquals(202, deliver("push", "s-3", PUSH, SECRET).status());
+        awaitSent(1);
     }
 
     private static String sign(String secret, byte[] body) throws Exception {

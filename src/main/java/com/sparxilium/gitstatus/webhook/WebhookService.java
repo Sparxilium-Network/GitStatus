@@ -34,20 +34,27 @@ public class WebhookService {
     private final ConfigStore store;
     private final Supplier<RuleSet> rules;
     private final NotificationDispatcher dispatcher;
+    private final SourceVerifier sources;
 
     public WebhookService(Function<String, WebhookAdapter> adapters, ConfigStore store, Supplier<RuleSet> rules,
-                          NotificationDispatcher dispatcher) {
+                          NotificationDispatcher dispatcher, SourceVerifier sources) {
         this.adapters = adapters;
         this.store = store;
         this.rules = rules;
         this.dispatcher = dispatcher;
+        this.sources = sources;
     }
 
+    /** @param remoteAddr the real client IP (already resolved through the trusted proxy) */
     public Result handle(String provider, Map<String, String> headers, byte[] body, String remoteAddr) {
         long start = System.nanoTime();
         WebhookAdapter adapter = adapters.apply(provider);
         if (adapter == null) {
             return new Result(404, "unknown provider");
+        }
+        if (!sources.allowed(provider, remoteAddr)) {
+            log.warn("Rejected {} webhook from {}: source not in allowed ranges", provider, remoteAddr);
+            return new Result(403, "forbidden");
         }
         String deliveryId = adapter.deliveryId(headers);
         String event = adapter.eventName(headers);

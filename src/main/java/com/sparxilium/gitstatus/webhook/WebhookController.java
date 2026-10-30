@@ -32,11 +32,13 @@ public class WebhookController {
     private final WebhookService service;
     private final AppSettings settings;
     private final ConfigStore store;
+    private final ClientIpResolver clientIp;
 
-    public WebhookController(WebhookService service, AppSettings settings, ConfigStore store) {
+    public WebhookController(WebhookService service, AppSettings settings, ConfigStore store, ClientIpResolver clientIp) {
         this.service = service;
         this.settings = settings;
         this.store = store;
+        this.clientIp = clientIp;
     }
 
     @PostMapping("/webhooks/{provider}")
@@ -56,7 +58,8 @@ public class WebhookController {
         for (String name : Collections.list(request.getHeaderNames())) {
             headers.put(name.toLowerCase(Locale.ROOT), request.getHeader(name));
         }
-        WebhookService.Result result = service.handle(provider.toLowerCase(Locale.ROOT), headers, body, request.getRemoteAddr());
+        String ip = clientIp.resolve(request.getRemoteAddr(), headers.get(clientIp.headerName()));
+        WebhookService.Result result = service.handle(provider.toLowerCase(Locale.ROOT), headers, body, ip);
         return ResponseEntity.status(result.status()).contentType(MediaType.TEXT_PLAIN).body(result.body());
     }
 

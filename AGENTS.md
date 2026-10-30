@@ -60,7 +60,7 @@ mvn -DskipTests package
 
 - **設定變更一律走 `ConfigStore.mutate`**：同一個 transaction 內寫入並 `revision + 1`。daemon 執行期的狀態（`destination_health`、`delivery_log`、`runtime_status`）不 bump revision。
 - **不得新增任何可讀取或修改設定的 HTTP 端點或 Discord 指令**（SEC-008）。公開 HTTP 只有 `POST /webhooks/{provider}` 與 `GET /health`。
-- **Webhook 必須先驗證簽章**才能做任何處理或寫入 delivery_log（SEC-001）。
+- **Webhook 必須先通過來源 IP 驗證與簽章驗證**才能做任何處理或寫入 delivery_log（SEC-001）。來源驗證必須維持 fail-closed；`CF-Connecting-IP` 只能在對端是 trusted proxy 時採信。
 - **不得記錄或保存 raw payload**；log 只寫 delivery id、provider、repo id、event type、結果、latency（SEC-003/004）。
 - **不得在 log 或錯誤訊息中輸出 token、private key、webhook secret**；錯誤訊息只寫設定名稱與路徑。
 - **送往 Discord 的內容只能來自 `NormalizedEvent` 的白名單欄位**，經 `Sanitizer` 處理，並維持 `allowed_mentions` 為空（SEC-005/006/007）。

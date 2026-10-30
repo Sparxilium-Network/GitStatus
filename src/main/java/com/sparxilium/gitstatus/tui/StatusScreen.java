@@ -16,6 +16,9 @@ import com.sparxilium.gitstatus.model.Records.DestinationHealth;
 import com.sparxilium.gitstatus.model.Records.DiscordDestination;
 import com.sparxilium.gitstatus.notify.DiscordGateway;
 import com.sparxilium.gitstatus.provider.GitProvider;
+import com.sparxilium.gitstatus.provider.github.GitHubHookSources;
+
+import tools.jackson.databind.json.JsonMapper;
 
 /** FR-012 system status: provider auth, Discord, DB, daemon, last webhook and last send results. */
 final class StatusScreen {
@@ -77,6 +80,20 @@ final class StatusScreen {
                 .ifPresent(s -> sb.append("  Reload error: ").append(s.value()).append('\n'));
         store.status("daemon.discord").ifPresent(s -> sb.append("  Discord: ").append(s.value()).append('\n'));
         sb.append("  Webhook endpoint: http://<host>:").append(settings.serverPort()).append("/webhooks/github\n");
+        store.status(GitHubHookSources.STATUS_KEY).ifPresentOrElse(s -> {
+            if (s.value() == null) {
+                sb.append("  Source verification: DISABLED\n");
+                return;
+            }
+            int count;
+            try {
+                count = JsonMapper.builder().build().readTree(s.value()).size();
+            } catch (RuntimeException e) {
+                count = 0;
+            }
+            sb.append("  Source verification: ").append(count).append(" GitHub hook ranges (updated ")
+                    .append(s.updatedAt()).append(")\n");
+        }, () -> sb.append("  Source verification: no GitHub hook ranges loaded (webhooks are rejected)\n"));
 
         sb.append("\nGit Providers\n");
         for (GitProvider p : providers) {

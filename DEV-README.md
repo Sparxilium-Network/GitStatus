@@ -28,7 +28,7 @@
 
 ```
 GitHub ──webhook──▶ WebhookController ─▶ WebhookService
-                                          │ verify (HMAC) → dedupe (delivery_log) → normalize
+                                          │ source IP → verify (HMAC) → dedupe (delivery_log) → normalize
                                           ▼
                                     RuleSet (AtomicReference) ◀── RuleSetHolder ◀── poll revision
                                           │ Repo × Event → Destinations
@@ -70,7 +70,7 @@ Admin TUI ──▶ ConfigStore.mutate (transaction + revision+1) ──▶ SQLi
 | `notification_rule` | Repo × Event × Destination |
 | `delivery_log` | 去重 + 有限 audit（只存 metadata，預設保留 30 天） |
 | `destination_health` | daemon 執行期：最近發送結果、`FAILED` 狀態 |
-| `runtime_status` | daemon 心跳、已載入 revision、Discord 狀態、reload 錯誤 |
+| `runtime_status` | daemon 心跳、已載入 revision、Discord 狀態、reload 錯誤、GitHub hook IP 清單 |
 
 Schema 以 `CREATE TABLE IF NOT EXISTS` 建立；之後新增的欄位在 `SchemaInitializer.migrate()` 以 `ALTER TABLE ... ADD COLUMN` 補上（冪等）。
 
@@ -89,11 +89,27 @@ Schema 以 `CREATE TABLE IF NOT EXISTS` 建立；之後新增的欄位在 `Schem
 - 新增語言：在 `Language` 加列舉值 → 在 `MessageFormatter` 加一份 `Texts` 並接到 `texts()` → 補 `MessageFormatterTest`。
 - 伺服器端（TUI、log、錯誤訊息）一律英文。
 
+## Webhook 來源驗證
+
+在 HMAC 簽章之前多一道檢查：只有 GitHub 公布的 webhook 來源 IP 可以送 webhook。
+
+1. **取得真實 IP**（`ClientIpResolver`）：只有當 TCP 對端是 `webhook.trustedProxies` 中的主機時，才採信 `webhook.clientIpHeader`（`CF-Connecting-IP`）。
+   預設信任的是 compose 服務名稱 `cloudflared`，每 60 秒重新解析成 IP；解析不到就不信任任何人。外部即使偽造這個 header 也無效。
+2. **比對 GitHub hook IP**（`GitHubHookSources`）：清單來自 `GET {github.apiUrl}/meta` 的 `hooks`。
+   - 有 Installation 時用 installation token 呼叫（5000 次/小時）；尚未設定 Installation 時才用未認證呼叫（每個 IP 60 次/小時，共用出口 IP 很容易用完）。
+   - 預設每 6 小時更新；尚未載入任何清單時每 10 分鐘重試。
+   - 清單存在 `runtime_status.github.hook_cidrs`，重啟時若 GitHub 暫時無法連線，沿用上次的清單。
+   - **Fail-closed**：從未成功載入清單時，所有 webhook 都回 403。
+3. 被拒絕的請求回 403、只記一行 WARN（來源 IP），不寫入 delivery_log，所以同一個 delivery id 之後從正確來源送來仍會處理。
+4. `webhook.verifySource=false` 可關閉（例如本機開發，或 GHES 不提供 hook IP 清單時）。TUI 系統狀態頁會顯示 `DISABLED`。
+
+這是縱深防禦，HMAC 簽章仍是真正的身分驗證。
+
 ## 安全設計對照
 
 | 需求 | 實作 |
 |---|---|
-| SEC-001 | `X-Hub-Signature-256` HMAC-SHA256，`MessageDigest.isEqual` 常數時間比對；失敗回 401，不寫入 delivery_log |
+| SEC-001 | 來源 IP 必須在 GitHub hook 範圍內（403）；`X-Hub-Signature-256` HMAC-SHA256，`MessageDigest.isEqual` 常數時間比對（401）；兩者失敗都不寫入 delivery_log |
 | SEC-002 | `(provider, provider_delivery_id)` 唯一鍵去重（`INSERT OR IGNORE`） |
 | SEC-003 | Secret 只從檔案讀取；錯誤訊息只含設定名稱與路徑；Installation token 只在記憶體 |
 | SEC-004 | 不保存 raw body；body 大小上限 `webhook.maxBodyBytes` |
@@ -122,7 +138,8 @@ mvn -DskipTests package
 | `GitHubAppAuthTest` | PKCS#1 / PKCS#8 金鑰、JWT 可被公鑰驗證 |
 | `GitHubWebhookAdapterTest` | 簽章、各事件正規化、form-encoded payload |
 | `SchemaMigrationTest` | 舊資料庫補上 `language` 欄位 |
-| `WebhookPipelineTest` | 真實 SQLite 端到端：路由、多目的地、各自語言、去重、錯誤簽章、reload、停用 / 未訂閱 / 撤銷授權 |
+| `ClientIpResolverTest` | CIDR 比對（v4 / v6）、只信任 trusted proxy 的 header、不做 DNS 誤判 |
+| `WebhookPipelineTest` | 真實 SQLite 端到端：路由、多目的地、各自語言、去重、錯誤簽章、來源驗證（含 fail-closed 與沿用已存清單）、reload、停用 / 未訂閱 / 撤銷授權 |
 
 ## 本機開發
 
@@ -166,6 +183,10 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 | `discord.token` | `/run/secrets/discord-token` | 檔案路徑 |
 | `reload.intervalMs` | `5000` | |
 | `webhook.maxBodyBytes` | `10485760` | |
+| `webhook.verifySource` | `true` | 只允許 GitHub hook IP |
+| `webhook.sourceRefreshMs` | `21600000` | GitHub hook IP 清單更新間隔（6 小時） |
+| `webhook.clientIpHeader` | `CF-Connecting-IP` | 真實 IP header |
+| `webhook.trustedProxies` | `cloudflared` | 可信任的代理：主機名稱或 CIDR，逗號分隔 |
 | `deliveryLog.retentionDays` | `30` | |
 
 ## 擴充
