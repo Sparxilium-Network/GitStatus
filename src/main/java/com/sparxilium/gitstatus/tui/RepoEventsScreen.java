@@ -26,7 +26,7 @@ import com.sparxilium.gitstatus.provider.GitProvider;
 import com.sparxilium.gitstatus.provider.GitProvider.Availability;
 
 /**
- * 5.5 Repository 事件設定: Repository × Event × Destination. Left/Right switches the destination
+ * 5.5 Repository event settings: Repository × Event × Destination. Left/Right switches the destination
  * being edited; S saves all destinations in one transaction.
  */
 final class RepoEventsScreen {
@@ -68,13 +68,13 @@ final class RepoEventsScreen {
     void show() {
         destinations = store.destinations();
         if (destinations.isEmpty()) {
-            Ui.info(gui, repo.fullName(), "尚未建立 Discord 目的地，請先到「Discord 目的地」新增。");
+            Ui.info(gui, repo.fullName(), "No Discord destination yet. Add one under \"Discord Destinations\" first.");
             return;
         }
         try {
             capabilities = provider.capabilities(inst);
         } catch (RuntimeException e) {
-            Ui.error(gui, "無法判斷 App 權限：" + Ui.message(e));
+            Ui.error(gui, "Cannot determine App permissions: " + Ui.message(e));
             return;
         }
         for (DiscordDestination d : destinations) {
@@ -86,17 +86,17 @@ final class RepoEventsScreen {
             }
         }
 
-        BasicWindow w = Ui.window("Repository 事件設定");
+        BasicWindow w = Ui.window("Repository Event Settings");
         Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
         panel.addComponent(new Label("Repository: " + repo.fullName() + "   [" + (repo.archived() ? "ARCHIVED" : repo.visibility()) + "]"));
-        panel.addComponent(new Label(repo.subscribed() ? "訂閱: 啟用"
-                : "訂閱: 未啟用（規則會保存，但需在 Repository 清單按 Space 啟用後才會通知）"));
+        panel.addComponent(new Label(repo.subscribed() ? "Subscription: enabled"
+                : "Subscription: disabled (rules are saved, but nothing is sent until enabled with Space in the repository list)"));
         panel.addComponent(destinationLabel);
         panel.addComponent(new EmptySpace());
         panel.addComponent(list);
         panel.addComponent(new EmptySpace());
         panel.addComponent(message);
-        panel.addComponent(new Label("Space: 開/關   Left/Right: 切換目的地   S: Save   Esc: 返回"));
+        panel.addComponent(new Label("Space: On/off   Left/Right: Switch destination   S: Save   Esc: Back"));
         w.setComponent(panel);
 
         list.addListener((index, checked) -> {
@@ -119,7 +119,7 @@ final class RepoEventsScreen {
                 set.remove(item.type());
             }
             dirty = true;
-            message.setText("尚未保存");
+            message.setText("Unsaved changes");
         });
 
         Ui.onKeys(w, (win, key) -> {
@@ -137,7 +137,7 @@ final class RepoEventsScreen {
                 return true; // Space toggles; Enter does nothing here
             }
             if (key.getKeyType() == KeyType.Escape && dirty) {
-                if (Ui.confirm(gui, "尚未保存", "放棄未保存的變更？")) {
+                if (Ui.confirm(gui, "Unsaved changes", "Discard unsaved changes?")) {
                     win.close();
                 }
                 return true;
@@ -154,8 +154,8 @@ final class RepoEventsScreen {
 
     private void render() {
         DiscordDestination d = currentDestination();
-        destinationLabel.setText("目的地 (" + (destIndex + 1) + "/" + destinations.size() + "): < " + d.name()
-                + (d.enabled() ? "" : "  [停用]") + " >");
+        destinationLabel.setText("Destination (" + (destIndex + 1) + "/" + destinations.size() + "): < " + d.name()
+                + (d.enabled() ? "" : "  [disabled]") + " >");
         Set<EventType> enabled = pending.get(d.id());
         suppress = true;
         try {
@@ -178,10 +178,10 @@ final class RepoEventsScreen {
         try {
             store.saveRules(repo.id(), pending);
             dirty = false;
-            message.setText("已保存（Daemon 將自動套用新規則）");
+            message.setText("Saved (the daemon applies the new rules automatically)");
         } catch (RuntimeException e) {
             // transaction rolled back, revision unchanged
-            Ui.error(gui, "保存失敗，未變更任何設定：" + Ui.message(e));
+            Ui.error(gui, "Save failed, nothing was changed: " + Ui.message(e));
         }
     }
 }

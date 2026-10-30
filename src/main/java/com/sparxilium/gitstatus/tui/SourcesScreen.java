@@ -16,7 +16,7 @@ import com.sparxilium.gitstatus.model.Records.InstallationStatus;
 import com.sparxilium.gitstatus.model.Records.ProviderInstallation;
 import com.sparxilium.gitstatus.provider.GitProvider;
 
-/** 5.3 Git Provider 來源選擇: installations authorized for the GitHub App, multi-select. */
+/** 5.3 Git provider sources: installations authorized for the GitHub App, multi-select. */
 final class SourcesScreen {
 
     private final WindowBasedTextGUI gui;
@@ -40,14 +40,14 @@ final class SourcesScreen {
     }
 
     void show() {
-        BasicWindow w = Ui.window("Git Provider 來源");
+        BasicWindow w = Ui.window("Git Provider Sources");
         Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
-        panel.addComponent(new Label("勾選要納入通知系統的帳號 / Organization（僅列出 App 已授權的 Installation）"));
+        panel.addComponent(new Label("Select accounts / organizations to notify on (only installations the App is authorized for)"));
         panel.addComponent(list);
         panel.addComponent(message);
-        panel.addComponent(new Label("GitLab: 尚未支援（Phase 5）"));
+        panel.addComponent(new Label("GitLab: not supported yet (Phase 5)"));
         panel.addComponent(new EmptySpace());
-        panel.addComponent(new Label("Space: 選取/取消    R: 從 API 重新整理    Esc: 返回"));
+        panel.addComponent(new Label("Space: Select/clear    R: Refresh from API    Esc: Back"));
         w.setComponent(panel);
 
         list.addListener((index, checked) -> {
@@ -58,7 +58,7 @@ final class SourcesScreen {
             try {
                 store.setInstallationSelected(item.inst().id(), checked);
             } catch (RuntimeException e) {
-                Ui.error(gui, "保存失敗：" + Ui.message(e));
+                Ui.error(gui, "Save failed: " + Ui.message(e));
                 reload();
             }
         });
@@ -77,16 +77,16 @@ final class SourcesScreen {
         StringBuilder status = new StringBuilder();
         for (GitProvider p : providers) {
             if (!p.configured()) {
-                status.append(p.displayName()).append(": 未設定（config.conf / secrets）  ");
+                status.append(p.displayName()).append(": not configured (config.conf / secrets)  ");
                 continue;
             }
             try {
-                var discovered = Ui.busy(gui, "讀取 " + p.displayName() + " Installations…", p::listInstallations);
+                var discovered = Ui.busy(gui, "Loading " + p.displayName() + " installations...", p::listInstallations);
                 store.syncInstallations(p.id(), discovered);
-                status.append(p.displayName()).append(": 已同步 ").append(discovered.size()).append(" 個來源  ");
+                status.append(p.displayName()).append(": synced ").append(discovered.size()).append(" source(s)  ");
             } catch (RuntimeException e) {
                 // keep the cached list; API failure must not overwrite valid configuration
-                status.append(p.displayName()).append(" API 失敗，顯示快取: ").append(Ui.message(e)).append("  ");
+                status.append(p.displayName()).append(" API failed, showing cached list: ").append(Ui.message(e)).append("  ");
             }
         }
         message.setText(status.toString().trim());

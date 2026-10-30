@@ -59,7 +59,7 @@ docker compose up -d --build
 - 不要申請任何 Write / Administration 權限。
 - 安裝 App 到要通知的帳號 / Organization，並只授權需要的 Repository。TUI 只會列出 App 實際被授權的 Installation 與 Repo。
 
-TUI 會依 Installation 的權限與訂閱事件判斷每個事件是否可用，不足時顯示「不可用 / 權限不足」或「App 未訂閱此 Webhook 事件」。
+TUI 會依 Installation 的權限與訂閱事件判斷每個事件是否可用，不足時顯示 `unavailable / insufficient permission` 或 `unavailable / App not subscribed to this webhook event`。
 
 ## Discord Bot 設定
 
@@ -70,11 +70,13 @@ TUI 會依 Installation 的權限與訂閱事件判斷每個事件是否可用�
 
 ## Admin TUI 操作流程
 
-1. **Discord 目的地**：從 Bot 可見的 Guild → 可發訊息的頻道選擇，或手動輸入 Channel ID；可發送測試訊息、停用、重設異常狀態。
-2. **Git Provider 來源**：自動從 GitHub API 讀取 Installation，Space 勾選要納入的帳號 / Organization。
-3. **Repository / 通知規則**：選來源 → 從 API 同步 Repo 清單（分頁），Space 啟用/停用訂閱，Enter 進入事件設定。
+TUI 介面為英文。
+
+1. **Discord Destinations**：從 Bot 可見的 Guild → 可發訊息的頻道選擇，或手動輸入 Channel ID；可發送測試訊息、停用、重設異常狀態。
+2. **Git Provider Sources**：自動從 GitHub API 讀取 Installation，Space 勾選要納入的帳號 / Organization。
+3. **Repositories / Notification Rules**：選來源 → 從 API 同步 Repo 清單（分頁），Space 啟用/停用訂閱，Enter 進入事件設定。
    事件設定頁以 Left/Right 切換目的地，Space 勾選事件，`S` 保存。
-4. **系統狀態**：DB revision、Daemon 已載入的 revision 與心跳、GitHub 認證、Discord 連線、最近一次 Webhook、各目的地最近發送結果。
+4. **System Status**：DB revision、Daemon 已載入的 revision 與心跳、GitHub 認證、Discord 連線、最近一次 Webhook、各目的地最近發送結果。
 
 每次保存都在單一 transaction 內寫入並把 `configuration_state.revision + 1`；Daemon 每 5 秒檢查 revision，
 載入並驗證成功後才原子替換規則，失敗則保留上一版。一般規則修改不需要 restart。
@@ -112,6 +114,6 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗（僅供開發）；在
 
 ## 尚未實作（後續階段）
 
-- Phase 5：Security 事件（Dependabot / Code scanning）、GitLab Adapter（介面 `GitProvider` / `WebhookAdapter` 已預留，TUI 會顯示「尚未支援」）。
+- Phase 5：Security 事件（Dependabot / Code scanning）、GitLab Adapter（介面 `GitProvider` / `WebhookAdapter` 已預留，TUI 會顯示 `not supported yet`）。
 - Phase 6：外部 Queue、Multi-bot（`bot_profile` 欄位已預留，目前只支援 `default`）。
 - Deployment 事件、Raw payload 加密除錯模式（SEC-004 選配）、Replay timestamp window（SEC-002 選配）。

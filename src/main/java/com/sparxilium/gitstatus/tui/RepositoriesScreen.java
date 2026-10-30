@@ -20,7 +20,7 @@ import com.sparxilium.gitstatus.model.Records.ProviderInstallation;
 import com.sparxilium.gitstatus.model.Records.RepositoryRecord;
 import com.sparxilium.gitstatus.provider.GitProvider;
 
-/** 5.4 Repository 選擇: paged list from the provider API, Space subscribes, Enter opens event rules. */
+/** 5.4 Repository selection: paged list from the provider API, Space subscribes, Enter opens event rules. */
 final class RepositoriesScreen {
 
     private static final int PAGE_SIZE = 15;
@@ -36,7 +36,7 @@ final class RepositoriesScreen {
     }
 
     void show() {
-        BasicWindow w = Ui.window("Repository / 通知規則");
+        BasicWindow w = Ui.window("Repositories / Notification Rules");
         ActionListBox sources = new ActionListBox(new TerminalSize(50, 10));
         for (GitProvider p : providers) {
             for (ProviderInstallation inst : store.installations(p.id())) {
@@ -47,13 +47,13 @@ final class RepositoriesScreen {
         }
         Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
         if (sources.isEmpty()) {
-            panel.addComponent(new Label("尚未選擇任何來源。請先到「Git Provider 來源」勾選帳號 / Organization。"));
+            panel.addComponent(new Label("No source selected. Select accounts / organizations under \"Git Provider Sources\" first."));
         } else {
-            panel.addComponent(new Label("選擇來源"));
+            panel.addComponent(new Label("Select source"));
             panel.addComponent(sources);
         }
         panel.addComponent(new EmptySpace());
-        panel.addComponent(new Label("Enter: 進入    Esc: 返回"));
+        panel.addComponent(new Label("Enter: Open    Esc: Back"));
         w.setComponent(panel);
         Ui.onKeys(w, (win, key) -> false);
         gui.addWindowAndWait(w);
@@ -62,10 +62,10 @@ final class RepositoriesScreen {
     private void openInstallation(GitProvider provider, ProviderInstallation inst) {
         String warning = "";
         try {
-            var repos = Ui.busy(gui, "讀取 Repository 清單…", () -> provider.listRepositories(inst));
+            var repos = Ui.busy(gui, "Loading repositories...", () -> provider.listRepositories(inst));
             store.syncRepositories(inst.id(), repos);
         } catch (RuntimeException e) {
-            warning = "API 失敗，顯示快取清單: " + Ui.message(e);
+            warning = "API failed, showing cached list: " + Ui.message(e);
         }
         new RepoList(provider, inst, warning).show();
     }
@@ -100,7 +100,7 @@ final class RepositoriesScreen {
             panel.addComponent(header);
             panel.addComponent(list);
             panel.addComponent(message);
-            panel.addComponent(new Label("Space: 啟用/停用   Enter: 進入 Repo 設定   Left/Right: 翻頁   Esc: 返回"));
+            panel.addComponent(new Label("Space: Enable/disable   Enter: Repo settings   Left/Right: Page   Esc: Back"));
             w.setComponent(panel);
 
             list.addListener((index, checked) -> {
@@ -112,7 +112,7 @@ final class RepositoriesScreen {
                     store.setSubscribed(r.id(), checked);
                     reloadData();
                 } catch (RuntimeException e) {
-                    Ui.error(gui, "保存失敗：" + Ui.message(e));
+                    Ui.error(gui, "Save failed: " + Ui.message(e));
                     reloadData();
                     render();
                 }

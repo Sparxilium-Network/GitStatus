@@ -150,7 +150,7 @@ public class GitHubProvider implements GitProvider {
             synchronized (this) {
                 if (auth == null) {
                     if (settings.githubAppId().isEmpty()) {
-                        throw new ProviderException("github.appId 未設定");
+                        throw new ProviderException("github.appId is not configured");
                     }
                     try {
                         auth = new GitHubAppAuth(settings.githubAppId(), settings.readGithubPrivateKey());
@@ -224,10 +224,10 @@ public class GitHubProvider implements GitProvider {
         try {
             response = http.send(request, HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {
-            throw new ProviderException("GitHub API 連線失敗: " + e.getClass().getSimpleName());
+            throw new ProviderException("GitHub API connection failed: " + e.getClass().getSimpleName());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new ProviderException("GitHub API 請求被中斷");
+            throw new ProviderException("GitHub API request interrupted");
         }
         int status = response.statusCode();
         if (status >= 200 && status < 300) {
@@ -235,11 +235,11 @@ public class GitHubProvider implements GitProvider {
         }
         String remaining = response.headers().firstValue("x-ratelimit-remaining").orElse("");
         if (status == 429 || (status == 403 && ("0".equals(remaining) || response.headers().firstValue("retry-after").isPresent()))) {
-            String wait = response.headers().firstValue("retry-after").map(s -> s + " 秒後")
+            String wait = response.headers().firstValue("retry-after").map(s -> "in " + s + " seconds")
                     .or(() -> response.headers().firstValue("x-ratelimit-reset")
-                            .map(s -> Instant.ofEpochSecond(Long.parseLong(s)) + " 之後"))
-                    .orElse("稍後");
-            throw new ProviderException("GitHub API rate limit，請於 " + wait + "再試");
+                            .map(s -> "after " + Instant.ofEpochSecond(Long.parseLong(s))))
+                    .orElse("later");
+            throw new ProviderException("GitHub API rate limit reached, retry " + wait);
         }
         // Only GitHub's short "message" is surfaced; the body is not logged.
         String message;

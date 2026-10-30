@@ -57,7 +57,7 @@ final class Ui {
     }
 
     static void error(WindowBasedTextGUI gui, String text) {
-        MessageDialog.showMessageDialog(gui, "錯誤", text, MessageDialogButton.OK);
+        MessageDialog.showMessageDialog(gui, "Error", text, MessageDialogButton.OK);
     }
 
     static boolean confirm(WindowBasedTextGUI gui, String title, String text) {
@@ -79,7 +79,7 @@ final class Ui {
 
     /** Runs a blocking call while a "please wait" box is on screen. */
     static <T> T busy(WindowBasedTextGUI gui, String message, Supplier<T> work) {
-        BasicWindow w = window("請稍候");
+        BasicWindow w = window("Please wait");
         w.setComponent(new Label(message));
         gui.addWindow(w);
         try {

@@ -62,16 +62,16 @@ public class AdminTui implements CommandLineRunner {
     private void mainMenu(MultiWindowTextGUI gui) {
         BasicWindow w = Ui.window("Git Notification Manager");
         ActionListBox menu = new ActionListBox(new TerminalSize(40, 5));
-        menu.addItem("Discord 目的地", () -> new DestinationsScreen(gui, store, discord).show());
-        menu.addItem("Git Provider 來源", () -> new SourcesScreen(gui, store, providers).show());
-        menu.addItem("Repository / 通知規則", () -> new RepositoriesScreen(gui, store, providers).show());
-        menu.addItem("系統狀態", () -> new StatusScreen(gui, store, discord, providers, settings).show());
-        menu.addItem("離開", w::close);
+        menu.addItem("Discord Destinations", () -> new DestinationsScreen(gui, store, discord).show());
+        menu.addItem("Git Provider Sources", () -> new SourcesScreen(gui, store, providers).show());
+        menu.addItem("Repositories / Notification Rules", () -> new RepositoriesScreen(gui, store, providers).show());
+        menu.addItem("System Status", () -> new StatusScreen(gui, store, discord, providers, settings).show());
+        menu.addItem("Exit", w::close);
 
         Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
         panel.addComponent(menu);
         panel.addComponent(new EmptySpace());
-        panel.addComponent(new Label("Up/Down 選擇    Enter 確認    Esc 返回"));
+        panel.addComponent(new Label("Up/Down: Select    Enter: Confirm    Esc: Back"));
         w.setComponent(panel);
         Ui.onKeys(w, (win, key) -> false);
         gui.addWindowAndWait(w);

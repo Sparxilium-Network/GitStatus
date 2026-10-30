@@ -71,7 +71,7 @@ mvn -DskipTests package
 ## 程式風格
 
 - 跟隨周邊程式碼的命名、註解密度與寫法。
-- TUI 顯示文字使用繁體中文；程式碼、log、識別字使用英文。
+- 伺服器端一律使用英文：TUI 顯示文字、錯誤訊息、log、程式碼與識別字。
 - 新功能必須附測試；`WebhookPipelineTest` 是以真實 SQLite 跑端到端流程的範例。
 
 ## 目前進度

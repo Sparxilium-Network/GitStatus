@@ -87,7 +87,7 @@ public class DiscordGateway implements DiscordSender {
     public String statusText() {
         JDA j = jda;
         if (j == null) {
-            return "未連線";
+            return "not connected";
         }
         return j.getStatus() + " as " + j.getSelfUser().getName() + " (" + j.getGuilds().size() + " guilds)";
     }

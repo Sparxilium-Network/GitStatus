@@ -34,9 +34,9 @@ public interface GitProvider {
 
     enum Availability {
         AVAILABLE(null),
-        NO_PERMISSION("不可用 / 權限不足"),
-        NOT_SUBSCRIBED("不可用 / App 未訂閱此 Webhook 事件"),
-        UNSUPPORTED("不可用 / 尚未支援");
+        NO_PERMISSION("unavailable / insufficient permission"),
+        NOT_SUBSCRIBED("unavailable / App not subscribed to this webhook event"),
+        UNSUPPORTED("unavailable / not supported yet");
 
         private final String reason;
 
