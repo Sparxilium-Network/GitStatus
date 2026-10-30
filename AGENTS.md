@@ -76,5 +76,11 @@ mvn -DskipTests package
 
 ## 目前進度
 
-- 已完成：Phase 1–4（見 README）。
+- 已完成：Phase 1–4（見 DEV-README.md）、伺服器端英文介面、每個目的地可選通知語言（English / 繁體中文）。
+
+## 文件
+
+- `README.md`：給一般使用者（安裝、設定、常見問題），不放技術細節。
+- `DEV-README.md`：技術細節（架構、資料模型、安全對照、測試、擴充方式）。
+- 改動功能時同步更新對應文件。
 - 待辦：Phase 5（Security 事件、GitLab Adapter）、Phase 6（外部 Queue、Multi-bot；`bot_profile` 欄位已預留）。
