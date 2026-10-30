@@ -1,0 +1,7 @@
+target/
+deploy/data/
+deploy/secrets/
+*.docx
+.git/
+.idea/
+.vscode/

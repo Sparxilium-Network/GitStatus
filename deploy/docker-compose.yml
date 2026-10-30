@@ -1,0 +1,23 @@
+# Host layout (e.g. /opt/git-notifier):
+#   docker-compose.yml
+#   config/config.conf
+#   data/                      (writable, owned by uid 10001)
+#   secrets/github-app.pem     (chmod 400, owned by uid 10001)
+#   secrets/github-webhook-secret
+#   secrets/discord-token
+#
+# Admin TUI:  docker compose exec bot java -jar /app/gitstatus.jar admin
+services:
+  bot:
+    image: git-discord-notifier:0.1.0
+    build:
+      context: ..
+    volumes:
+      - ./config/config.conf:/config/config.conf:ro
+      - ./data:/data
+      - ./secrets:/run/secrets:ro
+    ports:
+      # Put a TLS reverse proxy in front; bind to localhost only.
+      - "127.0.0.1:8080:8080"
+    mem_limit: 512m
+    restart: unless-stopped
