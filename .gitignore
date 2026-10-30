@@ -7,4 +7,6 @@ deploy/secrets/
 .idea/
 .vscode/
 *.iml
-deploy/cloudflared/
+deploy/tunnel/token
+deploy/tunnel/*.json
+deploy/tunnel/config.yml

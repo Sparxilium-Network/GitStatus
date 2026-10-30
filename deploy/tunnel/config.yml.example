@@ -1,0 +1,14 @@
+# Cloudflare Tunnel config for the command-line method (docs/CLOUDFLARE-TUNNEL.md, method B).
+# Copy to ~/.cloudflared/config.yml and replace the placeholders:
+#   <TUNNEL_ID>         printed by "cloudflared tunnel create"
+#   <CREDENTIALS_FILE>  the .json path printed by "cloudflared tunnel create"
+#   <HOSTNAME>          e.g. git-hooks.example.com
+tunnel: <TUNNEL_ID>
+credentials-file: <CREDENTIALS_FILE>
+
+ingress:
+  # Only the webhook path is public; everything else returns 404 at Cloudflare's edge.
+  - hostname: <HOSTNAME>
+    path: ^/webhooks/github$
+    service: http://localhost:33444
+  - service: http_status:404

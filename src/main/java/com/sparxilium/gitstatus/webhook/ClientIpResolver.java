@@ -1,10 +1,14 @@
 package com.sparxilium.gitstatus.webhook;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,14 +17,17 @@ import org.springframework.stereotype.Component;
 
 /**
  * Determines the real client IP. The client IP header (CF-Connecting-IP) is only trusted when
- * the TCP peer is a trusted proxy, i.e. the cloudflared container. Trusted proxies may be CIDRs
- * or hostnames; hostnames (e.g. the compose service {@code cloudflared}) are re-resolved at most
- * once per {@link #RESOLVE_TTL_MS}.
+ * the TCP peer is a trusted proxy. Trusted proxies may be CIDRs, hostnames, or the keyword
+ * {@value #GATEWAY}: the container's default gateway, which is the peer address of every
+ * connection forwarded from the host's published port (where the user's cloudflared connects).
+ * Hostnames and the gateway are re-resolved at most once per {@link #RESOLVE_TTL_MS}.
  */
 @Component
 public class ClientIpResolver {
 
     static final long RESOLVE_TTL_MS = 60_000;
+    static final String GATEWAY = "gateway";
+    private static final Path ROUTE_TABLE = Path.of("/proc/net/route");
 
     private final String header;
     private final List<String> fixedEntries;
@@ -97,13 +104,39 @@ public class ClientIpResolver {
     }
 
     private static List<String> lookup(String host) {
+        if (GATEWAY.equalsIgnoreCase(host)) {
+            try {
+                return defaultGateway(Files.readString(ROUTE_TABLE)).map(List::of).orElse(List.of());
+            } catch (IOException e) {
+                // not Linux / no /proc: trust nobody
+                return List.of();
+            }
+        }
         try {
             return Arrays.stream(InetAddress.getAllByName(host))
                     .map(a -> a.getHostAddress().replaceAll("%.*$", "")) // drop IPv6 scope id
                     .toList();
         } catch (UnknownHostException e) {
-            // not resolvable (e.g. cloudflared not running): trust nobody
+            // not resolvable: trust nobody
             return List.of();
         }
+    }
+
+    /**
+     * Default IPv4 gateway from a Linux {@code /proc/net/route} table: the row whose destination is
+     * {@code 00000000}; the gateway column is a little-endian hex address.
+     */
+    static Optional<String> defaultGateway(String routeTable) {
+        for (String line : routeTable.split("\n")) {
+            String[] cols = line.trim().split("\\s+");
+            if (cols.length > 2 && "00000000".equals(cols[1]) && cols[2].matches("[0-9A-Fa-f]{8}")) {
+                long g = Long.parseLong(cols[2], 16);
+                if (g == 0) {
+                    continue;
+                }
+                return Optional.of((g & 0xFF) + "." + ((g >> 8) & 0xFF) + "." + ((g >> 16) & 0xFF) + "." + ((g >> 24) & 0xFF));
+            }
+        }
+        return Optional.empty();
     }
 }

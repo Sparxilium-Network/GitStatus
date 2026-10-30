@@ -5,4 +5,4 @@ deploy/secrets/
 .git/
 .idea/
 .vscode/
-deploy/cloudflared/
+deploy/tunnel/

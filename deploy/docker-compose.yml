@@ -1,6 +1,6 @@
-# Recommended deployment: Cloudflare Tunnel. No port is published on the host;
-# GitHub reaches the bot only through the tunnel, and the bot only accepts
-# GitHub's webhook source IPs (forwarded by cloudflared as CF-Connecting-IP).
+# The service listens on 33444 and is published on the host loopback only.
+# Expose it to GitHub through your own Cloudflare Tunnel pointing at http://localhost:33444
+# (see docs/CLOUDFLARE-TUNNEL.md). Do not publish it on a public interface.
 #
 # Layout (this directory):
 #   docker-compose.yml
@@ -10,7 +10,6 @@
 #     github-app.pem
 #     github-webhook-secret
 #     discord-token
-#   cloudflared/token           owned by uid 65532 (cloudflared image user), chmod 400
 #
 # Admin TUI:  docker compose exec bot java -jar /app/gitstatus.jar admin
 services:
@@ -22,16 +21,8 @@ services:
       - ./config/config.conf:/config/config.conf:ro
       - ./data:/data
       - ./secrets:/run/secrets:ro
-    # Intentionally no "ports:". Do not publish 33444 on the host.
+    ports:
+      # Keep the 127.0.0.1 prefix: a published port bypasses ufw / firewalld.
+      - "127.0.0.1:33444:33444"
     mem_limit: 512m
-    restart: unless-stopped
-
-  cloudflared:
-    image: cloudflare/cloudflared:2026.10.6
-    command: tunnel --no-autoupdate run --token-file /etc/cloudflared/token
-    volumes:
-      # only the tunnel token; cloudflared never sees the GitHub / Discord secrets
-      - ./cloudflared/token:/etc/cloudflared/token:ro
-    depends_on:
-      - bot
     restart: unless-stopped

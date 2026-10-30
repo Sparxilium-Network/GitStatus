@@ -1,0 +1,14 @@
+# Optional: run your Cloudflare Tunnel connector with Docker.
+# See docs/CLOUDFLARE-TUNNEL.md. Put the tunnel token in ./token (one line), then:
+#   sudo chown 65532:65532 token && sudo chmod 400 token
+#   docker compose up -d
+#
+# network_mode: host lets cloudflared reach the bot at http://localhost:33444.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.6
+    command: tunnel --no-autoupdate run --token-file /etc/cloudflared/token
+    network_mode: host
+    volumes:
+      - ./token:/etc/cloudflared/token:ro
+    restart: unless-stopped

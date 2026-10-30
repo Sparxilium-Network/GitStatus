@@ -22,18 +22,21 @@
 
 ## 推薦的部署方式：Cloudflare Tunnel
 
-**請使用 Cloudflare Tunnel 部署，不要把服務的 port 直接開放到網路上。**
+**請透過你自己的 Cloudflare Tunnel 讓 GitHub 連進來，不要把服務的 port 直接開放到網路上。**
 
 ```
-GitHub ──HTTPS──▶ Cloudflare ──Tunnel──▶ cloudflared 容器 ──▶ bot 容器
+GitHub ──HTTPS──▶ Cloudflare ──Tunnel──▶ 你的 cloudflared ──▶ http://localhost:33444（通知服務）
                                          （伺服器只往外連，不開任何 port）
 ```
 
 - 伺服器不需要開放任何連入的 port，防火牆可以全部關閉，也不會暴露伺服器的真實 IP。
 - HTTPS 憑證由 Cloudflare 處理，不用自己架 Nginx / Caddy。
 - 服務會做**來源驗證**：只接受 GitHub 官方公布的 webhook IP，再加上簽章驗證，其他來源一律拒絕。
+- 通知服務預設只在本機的 `127.0.0.1:33444` 監聽，Tunnel 指向這個位址。
 
-> 不建議自己開 port 或用反向代理直接對外：伺服器 IP 會曝光、要自己維護 TLS 與防火牆，而且來源驗證預設只在 Tunnel 架構下才能取得真實的來源 IP。
+Tunnel 由你自己建立，照著 [Cloudflare Tunnel 設定教學](docs/CLOUDFLARE-TUNNEL.md) 填入網域與 token 即可完成。
+
+> 不建議自己開 port 或用反向代理直接對外：伺服器 IP 會曝光、要自己維護 TLS 與防火牆。
 
 ## 你需要準備
 
@@ -44,23 +47,19 @@ GitHub ──HTTPS──▶ Cloudflare ──Tunnel──▶ cloudflared 容器 
 
 ## 安裝步驟
 
-### 1. 建立 Cloudflare Tunnel
+### 1. 決定 Webhook 網址
 
-到 Cloudflare Dashboard → **Zero Trust** → **Networks** → **Tunnels** → **Create a tunnel**：
+先決定要用哪個子網域收 webhook，例如 `git-hooks.example.com`。你的 Webhook 網址就是：
 
-1. 類型選 **Cloudflared**，取一個名字（例如 `git-notifier`）。
-2. 在安裝說明頁面中，複製指令裡 `--token` 後面那一長串 token，等一下要用。（不用照它的指令安裝，我們用 Docker 跑。）
-3. 新增 **Public hostname**：
-   - **Subdomain / Domain**：例如 `git-hooks.example.com`
-   - **Path**：`webhooks/github`（只公開這個路徑，其他路徑一律不對外）
-   - **Service**：Type 選 `HTTP`，URL 填 `bot:33444`
-4. 儲存。你的 Webhook 網址就是 `https://git-hooks.example.com/webhooks/github`。
+```
+https://git-hooks.example.com/webhooks/github
+```
 
 ### 2. 建立 GitHub App
 
 到 GitHub → Settings → Developer settings → GitHub Apps → New GitHub App：
 
-- **Webhook URL**：步驟 1 的網址，例如 `https://git-hooks.example.com/webhooks/github`
+- **Webhook URL**：步驟 1 的網址
 - **Webhook secret**：自訂一串隨機字串，等一下要用。
 - **Repository permissions**（全部選 **Read-only**）：Metadata、Contents、Actions、Pull requests
 - **Subscribe to events**：Push、Pull request、Workflow run、Release
@@ -85,12 +84,10 @@ GitHub ──HTTPS──▶ Cloudflare ──Tunnel──▶ cloudflared 容器 
 ├── docker-compose.yml        ← 已附上，不需修改
 ├── config/config.conf        ← 填入步驟 2 的 App ID
 ├── data/                     ← 自行建立，資料庫會放在這裡
-├── secrets/                  ← 自行建立
-│   ├── github-app.pem         ← 步驟 2 下載的 Private key
-│   ├── github-webhook-secret  ← 步驟 2 自訂的 Webhook secret
-│   └── discord-token          ← 步驟 3 的 Bot Token
-└── cloudflared/              ← 自行建立
-    └── token                  ← 步驟 1 複製的 Tunnel token
+└── secrets/                  ← 自行建立
+    ├── github-app.pem         ← 步驟 2 下載的 Private key
+    ├── github-webhook-secret  ← 步驟 2 自訂的 Webhook secret
+    └── discord-token          ← 步驟 3 的 Bot Token
 ```
 
 在 `deploy/` 目錄設定檔案權限：
@@ -99,13 +96,7 @@ GitHub ──HTTPS──▶ Cloudflare ──Tunnel──▶ cloudflared 容器 
 sudo chown -R 10001:10001 data secrets && sudo chmod 700 data secrets && sudo chmod 400 secrets/*
 ```
 
-```bash
-sudo chown -R 65532:65532 cloudflared && sudo chmod 700 cloudflared && sudo chmod 400 cloudflared/token
-```
-
-兩組 secret 分開存放：Tunnel 只拿得到自己的 token，看不到 GitHub 與 Discord 的金鑰。
-
-### 5. 啟動
+### 5. 啟動通知服務
 
 第一次啟動會從原始碼建置 image（需要幾分鐘）：
 
@@ -113,13 +104,23 @@ sudo chown -R 65532:65532 cloudflared && sudo chmod 700 cloudflared && sudo chmo
 docker compose up -d --build
 ```
 
-確認兩個容器都在執行，且 `bot` 顯示 `healthy`：
+確認服務正常（在伺服器上執行）：
 
 ```bash
-docker compose ps
+curl http://127.0.0.1:33444/health
 ```
 
-回到 Cloudflare 的 Tunnel 頁面，狀態應顯示 **HEALTHY**。最後到 GitHub App 設定頁的 **Advanced** → **Recent Deliveries** 按 **Redeliver** 重送一次 `ping`，回應應為 `202`。
+看到 `{"status":"UP"}` 就代表啟動成功。
+
+### 6. 設定 Cloudflare Tunnel
+
+依照 [Cloudflare Tunnel 設定教學](docs/CLOUDFLARE-TUNNEL.md) 建立 Tunnel：
+
+- **HOSTNAME**：步驟 1 的子網域
+- **Path**：`webhooks/github`
+- **Service**：`http://localhost:33444`
+
+教學最後的「驗證」會帶你確認 Tunnel 已接通，以及 GitHub 重送的 `ping` 回應為 `202`。
 
 ## 設定通知
 
@@ -167,13 +168,13 @@ GitHub App 沒有被授權存取它。到 GitHub 的 App 安裝設定中把它�
 **GitHub 的 Recent Deliveries 顯示 `403`**
 請求沒有通過來源驗證。到 **System Status** 看 `Source verification` 那一行：
 - 顯示 `no GitHub hook ranges loaded`：服務還沒取得 GitHub 的 IP 清單（剛啟動或暫時連不到 GitHub）。服務會每 10 分鐘自動重試；在「設定通知」完成 **Git Provider Sources** 後，取得清單會更穩定。
-- 有顯示清單數量：請確認請求是經由 Cloudflare Tunnel 進來，而不是直接連到伺服器。
+- 有顯示清單數量：請確認 cloudflared 和通知服務在同一台主機，並連到 `localhost:33444`。
 
 **GitHub 的 Recent Deliveries 顯示 `401`**
 Webhook secret 不一致。確認 `secrets/github-webhook-secret` 與 GitHub App 設定的完全相同（檔案結尾的換行不影響）。
 
-**Cloudflare 的 Tunnel 狀態不是 HEALTHY**
-查看 `docker compose logs cloudflared`。最常見的原因是 `cloudflared/token` 內容錯誤，或檔案權限不是 uid 65532 可讀。
+**Tunnel 相關問題**
+請看 [Cloudflare Tunnel 設定教學](docs/CLOUDFLARE-TUNNEL.md) 的「驗證」與「常見問題」。
 
 ## 進一步加強（選用）
 

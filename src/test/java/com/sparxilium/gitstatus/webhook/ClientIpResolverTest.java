@@ -63,6 +63,25 @@ class ClientIpResolverTest {
     }
 
     @Test
+    void parsesDefaultGatewayFromRouteTable() {
+        String table = """
+                Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT
+                eth0\t00000000\t010012AC\t0003\t0\t0\t0\t00000000\t0\t0\t0
+                eth0\t000012AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0
+                """;
+        assertEquals("172.18.0.1", ClientIpResolver.defaultGateway(table).orElseThrow());
+        assertTrue(ClientIpResolver.defaultGateway("Iface\tDestination\tGateway\n").isEmpty());
+    }
+
+    @Test
+    void gatewayKeywordTrustsOnlyTheGateway() {
+        ClientIpResolver r = resolver("gateway", Map.of("gateway", List.of("172.18.0.1")));
+        assertEquals("140.82.115.1", r.resolve("172.18.0.1", "140.82.115.1"));
+        // another container on the same network cannot spoof the header
+        assertEquals("172.18.0.5", r.resolve("172.18.0.5", "140.82.115.1"));
+    }
+
+    @Test
     void noHeaderConfiguredMeansRemoteAddress() {
         ClientIpResolver r = new ClientIpResolver("", "127.0.0.1", host -> List.of());
         assertEquals("127.0.0.1", r.resolve("127.0.0.1", "140.82.115.1"));

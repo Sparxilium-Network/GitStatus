@@ -94,7 +94,7 @@ Schema 以 `CREATE TABLE IF NOT EXISTS` 建立；之後新增的欄位在 `Schem
 在 HMAC 簽章之前多一道檢查：只有 GitHub 公布的 webhook 來源 IP 可以送 webhook。
 
 1. **取得真實 IP**（`ClientIpResolver`）：只有當 TCP 對端是 `webhook.trustedProxies` 中的主機時，才採信 `webhook.clientIpHeader`（`CF-Connecting-IP`）。
-   預設信任的是 compose 服務名稱 `cloudflared`，每 60 秒重新解析成 IP；解析不到就不信任任何人。外部即使偽造這個 header 也無效。
+   預設為 `gateway`：容器的預設 gateway，也就是經由主機 published port（使用者的 cloudflared 連進來的地方）進來的連線的對端。每 60 秒重新讀取；讀不到就不信任任何人。其他來源即使偽造這個 header 也無效。
 2. **比對 GitHub hook IP**（`GitHubHookSources`）：清單來自 `GET {github.apiUrl}/meta` 的 `hooks`。
    - 有 Installation 時用 installation token 呼叫（5000 次/小時）；尚未設定 Installation 時才用未認證呼叫（每個 IP 60 次/小時，共用出口 IP 很容易用完）。
    - 預設每 6 小時更新；尚未載入任何清單時每 10 分鐘重試。
@@ -138,7 +138,7 @@ mvn -DskipTests package
 | `GitHubAppAuthTest` | PKCS#1 / PKCS#8 金鑰、JWT 可被公鑰驗證 |
 | `GitHubWebhookAdapterTest` | 簽章、各事件正規化、form-encoded payload |
 | `SchemaMigrationTest` | 舊資料庫補上 `language` 欄位 |
-| `ClientIpResolverTest` | CIDR 比對（v4 / v6）、只信任 trusted proxy 的 header、不做 DNS 誤判 |
+| `ClientIpResolverTest` | CIDR 比對（v4 / v6）、`/proc/net/route` gateway 解析、只信任 trusted proxy 的 header、不做 DNS 誤判 |
 | `WebhookPipelineTest` | 真實 SQLite 端到端：路由、多目的地、各自語言、去重、錯誤簽章、來源驗證（含 fail-closed 與沿用已存清單）、reload、停用 / 未訂閱 / 撤銷授權 |
 
 ## 本機開發
@@ -165,17 +165,21 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 
 ## 部署架構
 
-只支援並推薦 Cloudflare Tunnel（`deploy/docker-compose.yml`）：
+推薦使用者自行架設的 Cloudflare Tunnel；使用者教學在 [docs/CLOUDFLARE-TUNNEL.md](docs/CLOUDFLARE-TUNNEL.md)。
 
-- `bot` 不 publish 任何 port；只有同一個 compose network 裡的 `cloudflared` 連得到 `bot:33444`。
-- `cloudflared` 使用 remotely-managed tunnel（token），ingress 在 Cloudflare Dashboard 設定，只公開 `webhooks/github` 路徑；`/health` 不對外。
-- `cloudflared` 以 uid 65532 執行，只掛載自己的 token（`deploy/cloudflared/token`），看不到 `secrets/`。
-- `cloudflared` image 固定版本（目前 `2026.10.6`），並加 `--no-autoupdate`；升級時手動改版本。
+```
+GitHub → Cloudflare → 使用者的 cloudflared（主機上）→ 127.0.0.1:33444 → docker-proxy → bot:33444
+```
 
-不推薦自行開 port 或用反向代理對外。若一定要這樣做：
-- `ports` 必須綁 `127.0.0.1:`。Docker publish 的 port 會繞過 ufw / firewalld。
-- 把 `webhook.trustedProxies` 改成該反向代理的位址，`webhook.clientIpHeader` 改成它送出的真實 IP header。
-- 否則來源驗證拿到的是代理的 IP，所有 webhook 都會被 403 拒絕（fail-closed）。
+- `deploy/docker-compose.yml` 只 publish `127.0.0.1:33444:33444`。Docker publish 的 port 會繞過 ufw / firewalld，所以一定要保留 `127.0.0.1:` 前綴。
+- 經由 published port 進來的連線，在容器內看到的對端都是**容器的預設 gateway**（docker-proxy 或 hairpin NAT）。所以 `webhook.trustedProxies` 預設為 `gateway`：從 `/proc/net/route` 讀出預設 gateway，只信任它送來的 `CF-Connecting-IP`。同一個 Docker 網路上的其他容器無法偽造。
+- cloudflared 必須和 bot 在同一台主機，並連到 `localhost:33444`（系統服務，或 Docker `network_mode: host`）。
+- 教學附的範本：
+  - `deploy/tunnel/docker-compose.yml`：以 Docker 執行 remotely-managed tunnel（token 檔，uid 65532，固定版本 `2026.10.6`，`--no-autoupdate`）。
+  - `deploy/tunnel/config.yml.example`：指令列方式的 ingress，只公開 `^/webhooks/github$`，其他路徑回 404。
+- `deploy/tunnel/token`、`*.json`、`config.yml` 已列入 `.gitignore`。
+
+不推薦自行開 port 或用其他反向代理對外。若一定要這樣做，把 `webhook.trustedProxies` 改成該代理的位址、`webhook.clientIpHeader` 改成它送出的真實 IP header；否則來源驗證拿到的是代理的 IP，所有 webhook 都會被 403 拒絕（fail-closed）。
 
 本機開發不經過 Tunnel 時，用 `webhook.verifySource=false` 關閉來源驗證。
 
@@ -202,7 +206,7 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 | `webhook.verifySource` | `true` | 只允許 GitHub hook IP |
 | `webhook.sourceRefreshMs` | `21600000` | GitHub hook IP 清單更新間隔（6 小時） |
 | `webhook.clientIpHeader` | `CF-Connecting-IP` | 真實 IP header |
-| `webhook.trustedProxies` | `cloudflared` | 可信任的代理：主機名稱或 CIDR，逗號分隔 |
+| `webhook.trustedProxies` | `gateway` | 可信任的代理：`gateway`（容器預設 gateway）、主機名稱或 CIDR，逗號分隔 |
 | `deliveryLog.retentionDays` | `30` | |
 
 ## 擴充
