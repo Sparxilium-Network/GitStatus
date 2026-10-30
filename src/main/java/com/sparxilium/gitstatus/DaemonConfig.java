@@ -32,6 +32,7 @@ public class DaemonConfig {
     private final ConfigStore store;
     private final DiscordGateway discord;
     private final int retentionDays;
+    private volatile String lastDiscordError;
 
     public DaemonConfig(ConfigStore store, DiscordGateway discord, @Value("${deliveryLog.retentionDays}") int retentionDays) {
         this.store = store;
@@ -62,6 +63,7 @@ public class DaemonConfig {
                 discord.connect();
                 store.putStatus("daemon.discord", discord.statusText());
             } catch (RuntimeException e) {
+                lastDiscordError = e.getMessage();
                 store.putStatus("daemon.discord", "ERROR " + e.getMessage());
                 log.error("{}", e.getMessage());
             }
@@ -70,7 +72,14 @@ public class DaemonConfig {
 
     @Scheduled(fixedDelay = 60_000, initialDelay = 60_000)
     public void reportDiscordStatus() {
-        store.putStatus("daemon.discord", discord.connected() ? discord.statusText() : "DISCONNECTED");
+        String status;
+        if (discord.connected()) {
+            status = discord.statusText();
+        } else {
+            // keep the reason visible in the TUI status page
+            status = lastDiscordError != null ? "ERROR " + lastDiscordError : "DISCONNECTED";
+        }
+        store.putStatus("daemon.discord", status);
     }
 
     @Scheduled(cron = "0 17 3 * * *")
