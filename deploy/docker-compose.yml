@@ -1,10 +1,16 @@
-# Host layout (e.g. /opt/git-notifier):
+# Recommended deployment: Cloudflare Tunnel. No port is published on the host;
+# GitHub reaches the bot only through the tunnel, and the bot only accepts
+# GitHub's webhook source IPs (forwarded by cloudflared as CF-Connecting-IP).
+#
+# Layout (this directory):
 #   docker-compose.yml
 #   config/config.conf
-#   data/                      (writable, owned by uid 10001)
-#   secrets/github-app.pem     (chmod 400, owned by uid 10001)
-#   secrets/github-webhook-secret
-#   secrets/discord-token
+#   data/                       writable, owned by uid 10001
+#   secrets/                    owned by uid 10001, chmod 400 files
+#     github-app.pem
+#     github-webhook-secret
+#     discord-token
+#   cloudflared/token           owned by uid 65532 (cloudflared image user), chmod 400
 #
 # Admin TUI:  docker compose exec bot java -jar /app/gitstatus.jar admin
 services:
@@ -16,8 +22,16 @@ services:
       - ./config/config.conf:/config/config.conf:ro
       - ./data:/data
       - ./secrets:/run/secrets:ro
-    ports:
-      # Put a TLS reverse proxy in front; bind to localhost only.
-      - "127.0.0.1:8080:8080"
+    # Intentionally no "ports:". Do not publish 8080 on the host.
     mem_limit: 512m
+    restart: unless-stopped
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.6
+    command: tunnel --no-autoupdate run --token-file /etc/cloudflared/token
+    volumes:
+      # only the tunnel token; cloudflared never sees the GitHub / Discord secrets
+      - ./cloudflared/token:/etc/cloudflared/token:ro
+    depends_on:
+      - bot
     restart: unless-stopped

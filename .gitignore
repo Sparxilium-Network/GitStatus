@@ -7,3 +7,4 @@ deploy/secrets/
 .idea/
 .vscode/
 *.iml
+deploy/cloudflared/

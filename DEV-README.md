@@ -163,6 +163,22 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 - Daemon 輸出到 console（`docker compose logs`）；Admin TUI 不輸出到 console，寫到 `${java.io.tmpdir}/gitstatus-admin.log`。
 - Log 內容規範見 AGENTS.md：只記 metadata，不記 payload 與 secret。
 
+## 部署架構
+
+只支援並推薦 Cloudflare Tunnel（`deploy/docker-compose.yml`）：
+
+- `bot` 不 publish 任何 port；只有同一個 compose network 裡的 `cloudflared` 連得到 `bot:8080`。
+- `cloudflared` 使用 remotely-managed tunnel（token），ingress 在 Cloudflare Dashboard 設定，只公開 `webhooks/github` 路徑；`/health` 不對外。
+- `cloudflared` 以 uid 65532 執行，只掛載自己的 token（`deploy/cloudflared/token`），看不到 `secrets/`。
+- `cloudflared` image 固定版本（目前 `2026.10.6`），並加 `--no-autoupdate`；升級時手動改版本。
+
+不推薦自行開 port 或用反向代理對外。若一定要這樣做：
+- `ports` 必須綁 `127.0.0.1:`。Docker publish 的 port 會繞過 ufw / firewalld。
+- 把 `webhook.trustedProxies` 改成該反向代理的位址，`webhook.clientIpHeader` 改成它送出的真實 IP header。
+- 否則來源驗證拿到的是代理的 IP，所有 webhook 都會被 403 拒絕（fail-closed）。
+
+本機開發不經過 Tunnel 時，用 `webhook.verifySource=false` 關閉來源驗證。
+
 ## Docker
 
 - Multi-stage build：`maven:3.10-eclipse-temurin-25` → `eclipse-temurin:25-jre`。
