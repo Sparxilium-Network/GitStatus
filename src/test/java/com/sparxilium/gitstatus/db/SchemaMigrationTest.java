@@ -33,7 +33,7 @@ class SchemaMigrationTest {
                 """);
         jdbc.update("INSERT INTO discord_destination (name, channel_id, created_at) VALUES ('old', '111111111111111111', 'x')");
 
-        AppSettings settings = new AppSettings(db, "https://api.github.com", "", "", "", "", 5000, 1000, 8080);
+        AppSettings settings = new AppSettings(db, "https://api.github.com", "", "", "", "", 5000, 1000, 33444);
         SchemaInitializer init = new SchemaInitializer(jdbc, settings);
         init.afterPropertiesSet();
         init.afterPropertiesSet(); // idempotent

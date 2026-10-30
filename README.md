@@ -53,7 +53,7 @@ GitHub ──HTTPS──▶ Cloudflare ──Tunnel──▶ cloudflared 容器 
 3. 新增 **Public hostname**：
    - **Subdomain / Domain**：例如 `git-hooks.example.com`
    - **Path**：`webhooks/github`（只公開這個路徑，其他路徑一律不對外）
-   - **Service**：Type 選 `HTTP`，URL 填 `bot:8080`
+   - **Service**：Type 選 `HTTP`，URL 填 `bot:33444`
 4. 儲存。你的 Webhook 網址就是 `https://git-hooks.example.com/webhooks/github`。
 
 ### 2. 建立 GitHub App

@@ -167,7 +167,7 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 
 只支援並推薦 Cloudflare Tunnel（`deploy/docker-compose.yml`）：
 
-- `bot` 不 publish 任何 port；只有同一個 compose network 裡的 `cloudflared` 連得到 `bot:8080`。
+- `bot` 不 publish 任何 port；只有同一個 compose network 裡的 `cloudflared` 連得到 `bot:33444`。
 - `cloudflared` 使用 remotely-managed tunnel（token），ingress 在 Cloudflare Dashboard 設定，只公開 `webhooks/github` 路徑；`/health` 不對外。
 - `cloudflared` 以 uid 65532 執行，只掛載自己的 token（`deploy/cloudflared/token`），看不到 `secrets/`。
 - `cloudflared` image 固定版本（目前 `2026.10.6`），並加 `--no-autoupdate`；升級時手動改版本。
@@ -190,7 +190,7 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 
 | Key | 預設 | 說明 |
 |---|---|---|
-| `server.port` | `8080` | |
+| `server.port` | `33444` | 容器內監聽的 port；Dockerfile 的 EXPOSE 與 HEALTHCHECK 也使用 33444 |
 | `database` | `/data/bot.db` | |
 | `github.appId` | | |
 | `github.privateKey` | `/run/secrets/github-app.pem` | 檔案路徑 |

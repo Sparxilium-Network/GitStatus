@@ -20,9 +20,9 @@ ENV GITSTATUS_CONFIG=/config/config.conf \
 
 USER notifier
 WORKDIR /app
-EXPOSE 8080
+EXPOSE 33444
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s \
-  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+  CMD ["bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/33444 && printf 'GET /health HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
 # Daemon heap is capped at 40% of the container limit, leaving room for an admin TUI JVM
 # (started via docker compose exec with the JVM default of 25%). Set here rather than in
 # JAVA_TOOL_OPTIONS so the JVM does not print a "Picked up" notice into the TUI terminal.

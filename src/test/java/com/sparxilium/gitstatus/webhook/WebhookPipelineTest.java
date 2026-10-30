@@ -66,7 +66,7 @@ class WebhookPipelineTest {
         DriverManagerDataSource ds = new DriverManagerDataSource(
                 "jdbc:sqlite:" + db + "?journal_mode=WAL&busy_timeout=5000&foreign_keys=true&transaction_mode=IMMEDIATE");
         JdbcTemplate jdbc = new JdbcTemplate(ds);
-        AppSettings settings = new AppSettings(db, "https://api.github.com", "", "", "", "", 5000, 1_000_000, 8080);
+        AppSettings settings = new AppSettings(db, "https://api.github.com", "", "", "", "", 5000, 1_000_000, 33444);
         new SchemaInitializer(jdbc, settings).afterPropertiesSet();
         store = new ConfigStore(jdbc, new TransactionTemplate(new DataSourceTransactionManager(ds)));
         holder = new RuleSetHolder(new RuleSetLoader(jdbc, store), store);
