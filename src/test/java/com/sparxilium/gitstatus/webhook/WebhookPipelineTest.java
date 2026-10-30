@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,6 +48,7 @@ class WebhookPipelineTest {
     private ConfigStore store;
     private RuleSetHolder holder;
     private WebhookService service;
+    private NotificationDispatcher dispatcher;
     private final List<Sent> sent = new CopyOnWriteArrayList<>();
     private DiscordDestination build;
     private DiscordDestination alerts;
@@ -68,7 +70,7 @@ class WebhookPipelineTest {
         holder.afterPropertiesSet();
 
         DiscordSender sender = (d, m) -> sent.add(new Sent(d.name(), m));
-        NotificationDispatcher dispatcher = new NotificationDispatcher(sender, store, 100, 2, 10);
+        dispatcher = new NotificationDispatcher(sender, store, 100, 2, 10);
         GitHubWebhookAdapter adapter = new GitHubWebhookAdapterFactory().create(SECRET);
         service = new WebhookService(p -> "github".equals(p) ? adapter : null, store, holder::current, dispatcher);
 
@@ -88,6 +90,12 @@ class WebhookPipelineTest {
                 build.id(), EnumSet.of(EventType.PUSH, EventType.ACTION_FAILURE),
                 alerts.id(), EnumSet.of(EventType.ACTION_FAILURE)));
         holder.reloadIfChanged();
+    }
+
+    /** Let in-flight sends finish so the SQLite files can be deleted (Windows keeps them locked). */
+    @AfterEach
+    void tearDown() {
+        dispatcher.shutdown();
     }
 
     private WebhookService.Result deliver(String event, String delivery, String body, String secret) throws Exception {
@@ -157,6 +165,7 @@ class WebhookPipelineTest {
         assertTrue(sent.isEmpty());
         // not recorded, so a correctly signed retry with the same id is still processed
         assertEquals(202, deliver("push", "d-3", PUSH, SECRET).status());
+        awaitSent(1);
     }
 
     @Test
