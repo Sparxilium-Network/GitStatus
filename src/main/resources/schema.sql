@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS discord_destination (
     channel_id  TEXT    NOT NULL,
     bot_profile TEXT    NOT NULL DEFAULT 'default',
     enabled     INTEGER NOT NULL DEFAULT 1,
-    created_at  TEXT    NOT NULL
+    created_at  TEXT    NOT NULL,
+    -- notification language: 'en' or 'zh-TW'
+    language    TEXT    NOT NULL DEFAULT 'en'
 );
 
 CREATE TABLE IF NOT EXISTS provider_installation (

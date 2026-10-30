@@ -44,7 +44,21 @@ public class SchemaInitializer implements InitializingBean {
                 jdbc.execute(sql);
             }
         }
+        migrate();
         restrictPermissions(db);
+    }
+
+    /** Columns added after v1; CREATE TABLE IF NOT EXISTS does not add them to existing databases. */
+    private void migrate() {
+        addColumnIfMissing("discord_destination", "language", "TEXT NOT NULL DEFAULT 'en'");
+    }
+
+    private void addColumnIfMissing(String table, String column, String definition) {
+        boolean exists = jdbc.queryForList("SELECT name FROM pragma_table_info(?)", String.class, table).contains(column);
+        if (!exists) {
+            jdbc.execute("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition);
+            log.info("Database migrated: added {}.{}", table, column);
+        }
     }
 
     private static String stripComments(String statement) {

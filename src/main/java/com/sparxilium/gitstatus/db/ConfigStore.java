@@ -16,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.sparxilium.gitstatus.model.EventType;
+import com.sparxilium.gitstatus.model.Language;
 import com.sparxilium.gitstatus.model.Records.DeliveryLogEntry;
 import com.sparxilium.gitstatus.model.Records.DestinationHealth;
 import com.sparxilium.gitstatus.model.Records.DiscordDestination;
@@ -64,14 +65,18 @@ public class ConfigStore {
     // ---------------------------------------------------------------- destinations
 
     public List<DiscordDestination> destinations() {
-        return jdbc.query("SELECT id, name, guild_id, channel_id, bot_profile, enabled FROM discord_destination ORDER BY name",
+        return jdbc.query("SELECT id, name, guild_id, channel_id, bot_profile, enabled, language FROM discord_destination ORDER BY name",
                 (rs, i) -> new DiscordDestination(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                        rs.getString(5), rs.getInt(6) != 0));
+                        rs.getString(5), rs.getInt(6) != 0, Language.fromCode(rs.getString(7))));
     }
 
-    public void addDestination(String name, String guildId, String channelId) {
-        mutate(j -> j.update("INSERT INTO discord_destination (name, guild_id, channel_id, bot_profile, enabled, created_at) "
-                + "VALUES (?, ?, ?, 'default', 1, ?)", name, guildId, channelId, now()));
+    public void addDestination(String name, String guildId, String channelId, Language language) {
+        mutate(j -> j.update("INSERT INTO discord_destination (name, guild_id, channel_id, bot_profile, enabled, created_at, language) "
+                + "VALUES (?, ?, ?, 'default', 1, ?, ?)", name, guildId, channelId, now(), language.code()));
+    }
+
+    public void setDestinationLanguage(long id, Language language) {
+        mutate(j -> j.update("UPDATE discord_destination SET language = ? WHERE id = ?", language.code(), id));
     }
 
     public void setDestinationEnabled(long id, boolean enabled) {

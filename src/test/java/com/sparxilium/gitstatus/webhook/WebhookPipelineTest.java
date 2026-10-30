@@ -26,6 +26,7 @@ import com.sparxilium.gitstatus.db.ConfigStore.DiscoveredInstallation;
 import com.sparxilium.gitstatus.db.ConfigStore.DiscoveredRepository;
 import com.sparxilium.gitstatus.db.SchemaInitializer;
 import com.sparxilium.gitstatus.model.EventType;
+import com.sparxilium.gitstatus.model.Language;
 import com.sparxilium.gitstatus.model.Records.DiscordDestination;
 import com.sparxilium.gitstatus.model.Records.RepositoryRecord;
 import com.sparxilium.gitstatus.notify.DiscordMessage;
@@ -79,8 +80,8 @@ class WebhookPipelineTest {
         store.syncRepositories(instId, List.of(new DiscoveredRepository("42", "acme/api", "PRIVATE", false)));
         repo = store.repositories(instId).get(0);
         store.setSubscribed(repo.id(), true);
-        store.addDestination("A / #build", "1", "111111111111111111");
-        store.addDestination("B / #alerts", "2", "222222222222222222");
+        store.addDestination("A / #build", "1", "111111111111111111", Language.EN);
+        store.addDestination("B / #alerts", "2", "222222222222222222", Language.ZH_TW);
         build = store.destinations().stream().filter(d -> d.name().contains("build")).findFirst().orElseThrow();
         alerts = store.destinations().stream().filter(d -> d.name().contains("alerts")).findFirst().orElseThrow();
         store.saveRules(repo.id(), Map.of(
@@ -128,6 +129,16 @@ class WebhookPipelineTest {
         awaitSent(2);
         assertEquals(2, sent.size());
         assertEquals(List.of("A / #build", "B / #alerts"), sent.stream().map(Sent::destination).sorted().toList());
+    }
+
+    @Test
+    void eachDestinationGetsItsOwnLanguage() throws Exception {
+        deliver("workflow_run", "d-9", FAILURE, SECRET);
+        awaitSent(2);
+        Map<String, String> titles = new java.util.HashMap<>();
+        sent.forEach(s -> titles.put(s.destination(), s.message().title()));
+        assertEquals("[acme/api] CI failed", titles.get("A / #build"));
+        assertEquals("[acme/api] CI 失敗", titles.get("B / #alerts"));
     }
 
     @Test

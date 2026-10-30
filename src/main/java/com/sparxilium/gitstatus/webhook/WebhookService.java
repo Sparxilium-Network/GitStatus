@@ -1,5 +1,6 @@
 package com.sparxilium.gitstatus.webhook;
 
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -9,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.sparxilium.gitstatus.db.ConfigStore;
+import com.sparxilium.gitstatus.model.Language;
 import com.sparxilium.gitstatus.model.NormalizedEvent;
 import com.sparxilium.gitstatus.model.Records.DiscordDestination;
 import com.sparxilium.gitstatus.notify.DiscordMessage;
@@ -94,9 +96,10 @@ public class WebhookService {
             if (destinations.isEmpty()) {
                 continue;
             }
-            DiscordMessage message = MessageFormatter.format(e);
+            Map<Language, DiscordMessage> messages = new EnumMap<>(Language.class);
             String context = provider + " delivery=" + deliveryId + " repo=" + e.repositoryId() + " " + e.eventType();
             for (DiscordDestination d : destinations) {
+                DiscordMessage message = messages.computeIfAbsent(d.language(), lang -> MessageFormatter.format(e, lang));
                 if (dispatcher.enqueue(d, message, context)) {
                     queued++;
                 }

@@ -7,7 +7,7 @@ public final class Records {
     }
 
     public record DiscordDestination(long id, String name, String guildId, String channelId,
-                                     String botProfile, boolean enabled) {
+                                     String botProfile, boolean enabled, Language language) {
     }
 
     public record DestinationHealth(long destinationId, String status, String lastError,

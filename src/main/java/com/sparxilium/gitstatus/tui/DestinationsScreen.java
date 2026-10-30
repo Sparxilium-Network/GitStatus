@@ -1,6 +1,5 @@
 package com.sparxilium.gitstatus.tui;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -14,12 +13,14 @@ import com.googlecode.lanterna.gui2.LinearLayout;
 import com.googlecode.lanterna.gui2.Panel;
 import com.googlecode.lanterna.gui2.WindowBasedTextGUI;
 import com.sparxilium.gitstatus.db.ConfigStore;
+import com.sparxilium.gitstatus.model.Language;
 import com.sparxilium.gitstatus.model.Records.DestinationHealth;
 import com.sparxilium.gitstatus.model.Records.DiscordDestination;
 import com.sparxilium.gitstatus.notify.DiscordGateway;
 import com.sparxilium.gitstatus.notify.DiscordGateway.ChannelInfo;
 import com.sparxilium.gitstatus.notify.DiscordGateway.GuildInfo;
 import com.sparxilium.gitstatus.notify.DiscordMessage;
+import com.sparxilium.gitstatus.notify.MessageFormatter;
 import com.sparxilium.gitstatus.notify.DiscordSender.SendException;
 
 /** 5.2 Discord destinations. */
@@ -55,7 +56,8 @@ final class DestinationsScreen {
         for (DiscordDestination d : store.destinations()) {
             DestinationHealth h = health.get(d.id());
             String state = !d.enabled() ? "disabled" : h == null ? "enabled" : "FAILED".equals(h.status()) ? "FAILED" : h.status();
-            String label = Ui.pad(d.name(), 24) + " " + Ui.pad("ch " + d.channelId(), 26) + " [" + state + "]";
+            String label = Ui.pad(d.name(), 24) + " " + Ui.pad("ch " + d.channelId(), 26) + " " + Ui.pad(d.language().code(), 6)
+                    + "[" + state + "]";
             list.addItem(label, () -> destinationActions(d, h));
         }
         list.addItem("+ Add destination (pick from channels visible to the bot)", this::addFromList);
@@ -132,8 +134,12 @@ final class DestinationsScreen {
         if (name == null || name.isBlank()) {
             return;
         }
+        Language language = chooseLanguage();
+        if (language == null) {
+            return;
+        }
         try {
-            store.addDestination(name.trim(), guildId, channelId);
+            store.addDestination(name.trim(), guildId, channelId, language);
         } catch (RuntimeException e) {
             Ui.error(gui, "Save failed (name may already exist): " + Ui.message(e));
             return;
@@ -146,16 +152,22 @@ final class DestinationsScreen {
                 + (h != null && h.lastError() != null ? "\nLast error: " + h.lastError() : "")
                 + (h != null && h.lastSuccessAt() != null ? "\nLast success: " + h.lastSuccessAt() : "");
         String test = "Send test message";
+        String language = "Notification language: " + d.language().displayName();
         String toggle = d.enabled() ? "Disable" : "Enable";
         String reset = "Reset failure state";
         String delete = "Delete";
-        String action = Ui.choose(gui, d.name(), detail, test, toggle, reset, delete);
+        String action = Ui.choose(gui, d.name(), detail, test, language, toggle, reset, delete);
         if (action == null) {
             return;
         }
         try {
             if (action.equals(test)) {
                 sendTest(d);
+            } else if (action.equals(language)) {
+                Language chosen = chooseLanguage();
+                if (chosen != null && chosen != d.language()) {
+                    store.setDestinationLanguage(d.id(), chosen);
+                }
             } else if (action.equals(toggle)) {
                 store.setDestinationEnabled(d.id(), !d.enabled());
             } else if (action.equals(reset)) {
@@ -170,10 +182,12 @@ final class DestinationsScreen {
         refresh();
     }
 
+    private Language chooseLanguage() {
+        return Ui.choose(gui, "Notification language", "Language of messages sent to this channel", Language.values());
+    }
+
     private void sendTest(DiscordDestination d) {
-        DiscordMessage msg = new DiscordMessage("Git Notification Manager test message", null,
-                "This channel is configured as notification destination \"" + d.name().replace("@", "@​") + "\".",
-                0x0969DA, List.of(), "gitstatus", Instant.now());
+        DiscordMessage msg = MessageFormatter.testMessage(d.name(), d.language());
         try {
             Ui.busy(gui, "Sending...", () -> {
                 try {

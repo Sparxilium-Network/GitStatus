@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import com.sparxilium.gitstatus.db.ConfigStore;
 import com.sparxilium.gitstatus.model.EventType;
+import com.sparxilium.gitstatus.model.Language;
 import com.sparxilium.gitstatus.model.Records.DiscordDestination;
 import com.sparxilium.gitstatus.routing.RuleSet.RepoKey;
 
@@ -19,7 +20,7 @@ public class RuleSetLoader {
 
     private static final String ROUTES_SQL = """
             SELECT pi.provider, pi.external_id, r.external_repo_id, nr.event_type,
-                   d.id, d.name, d.guild_id, d.channel_id, d.bot_profile
+                   d.id, d.name, d.guild_id, d.channel_id, d.bot_profile, d.language
             FROM notification_rule nr
             JOIN repository r             ON r.id = nr.repository_id AND r.accessible = 1
             JOIN subscription s           ON s.repository_id = r.id AND s.enabled = 1
@@ -55,7 +56,7 @@ public class RuleSetLoader {
             long before = store.revision();
             List<Row> rows = jdbc.query(ROUTES_SQL, (rs, i) -> new Row(rs.getString(1), rs.getString(2), rs.getString(3),
                     rs.getString(4), new DiscordDestination(rs.getLong(5), rs.getString(6), rs.getString(7), rs.getString(8),
-                            rs.getString(9), true)));
+                            rs.getString(9), true, Language.fromCode(rs.getString(10)))));
             long after = store.revision();
             if (before == after) {
                 return build(after, rows);
