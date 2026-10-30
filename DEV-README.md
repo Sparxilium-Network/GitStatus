@@ -134,6 +134,18 @@ GITSTATUS_CONFIG=C:/path/to/config.conf java -jar target/gitstatus.jar run
 
 Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker 內使用真實終端機（需要 TTY）。
 
+## Log
+
+格式由 `application.properties` 的 `logging.pattern.console` / `logging.pattern.file` 設定：
+
+```
+[2026-10-30 20:29:56 WARN]: Rejected github webhook delivery=... invalid signature
+```
+
+- 時間使用 JVM 時區；Docker 容器預設為 UTC，需要本地時間可在 compose 設定 `TZ` 環境變數。
+- Daemon 輸出到 console（`docker compose logs`）；Admin TUI 不輸出到 console，寫到 `${java.io.tmpdir}/gitstatus-admin.log`。
+- Log 內容規範見 AGENTS.md：只記 metadata，不記 payload 與 secret。
+
 ## Docker
 
 - Multi-stage build：`maven:3.10-eclipse-temurin-25` → `eclipse-temurin:25-jre`。
