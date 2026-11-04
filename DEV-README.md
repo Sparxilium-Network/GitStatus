@@ -1,6 +1,6 @@
 # gitstatus — 開發者文件
 
-使用者安裝與操作請看 [README.md](README.md)。AI agent / 貢獻者的工作規則請看 [AGENTS.md](AGENTS.md)。
+使用者安裝與操作請看 [README.md](README.md)。
 需求來源：`git_discord_notification_system_requirements.docx`（已完成 Phase 1–4）。
 
 ## 技術選型
@@ -179,7 +179,7 @@ TUI 畫面是逐行從左上角輸出的純文字（`=====` 分隔線、`>` 游�
 
 - 時間使用 JVM 時區；Docker 容器預設為 UTC，需要本地時間可在 compose 設定 `TZ` 環境變數。
 - Daemon 輸出到 console（`docker compose logs`）；Admin TUI 不輸出到 console，寫到 `${java.io.tmpdir}/gitstatus-admin.log`。
-- Log 內容規範見 AGENTS.md：只記 metadata，不記 payload 與 secret。
+- Log 只記 metadata，不記 payload 與 secret。
 
 ### 啟動檢查
 
