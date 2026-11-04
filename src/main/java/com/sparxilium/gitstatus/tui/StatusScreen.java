@@ -3,13 +3,7 @@ package com.sparxilium.gitstatus.tui;
 import java.util.List;
 import java.util.Map;
 
-import com.googlecode.lanterna.gui2.BasicWindow;
-import com.googlecode.lanterna.gui2.Direction;
-import com.googlecode.lanterna.gui2.EmptySpace;
-import com.googlecode.lanterna.gui2.Label;
-import com.googlecode.lanterna.gui2.LinearLayout;
-import com.googlecode.lanterna.gui2.Panel;
-import com.googlecode.lanterna.gui2.WindowBasedTextGUI;
+import com.googlecode.lanterna.input.KeyStroke;
 import com.sparxilium.gitstatus.config.AppSettings;
 import com.sparxilium.gitstatus.db.ConfigStore;
 import com.sparxilium.gitstatus.model.Records.DestinationHealth;
@@ -21,18 +15,18 @@ import com.sparxilium.gitstatus.provider.github.GitHubHookSources;
 import tools.jackson.databind.json.JsonMapper;
 
 /** FR-012 system status: provider auth, Discord, DB, daemon, last webhook and last send results. */
-final class StatusScreen {
+final class StatusScreen extends Tui.View {
 
-    private final WindowBasedTextGUI gui;
+    private final Tui tui;
     private final ConfigStore store;
     private final DiscordGateway discord;
     private final List<GitProvider> providers;
     private final AppSettings settings;
-    private final Label body = new Label("");
+    private String body = "";
 
-    StatusScreen(WindowBasedTextGUI gui, ConfigStore store, DiscordGateway discord, List<GitProvider> providers,
+    StatusScreen(Tui tui, ConfigStore store, DiscordGateway discord, List<GitProvider> providers,
                  AppSettings settings) {
-        this.gui = gui;
+        this.tui = tui;
         this.store = store;
         this.discord = discord;
         this.providers = providers;
@@ -40,25 +34,32 @@ final class StatusScreen {
     }
 
     void show() {
-        BasicWindow w = Ui.window("System Status");
-        Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
-        panel.addComponent(body);
-        panel.addComponent(new EmptySpace());
-        panel.addComponent(new Label("R: Refresh    D: Test Discord connection    Esc: Back"));
-        w.setComponent(panel);
-        Ui.onKeys(w, (win, key) -> {
-            if (Ui.isChar(key, 'r')) {
-                refresh(false);
-                return true;
-            }
-            if (Ui.isChar(key, 'd')) {
-                refresh(true);
-                return true;
-            }
-            return false;
-        });
         refresh(false);
-        gui.addWindowAndWait(w);
+        tui.show(this);
+    }
+
+    @Override
+    String title() {
+        return "System Status";
+    }
+
+    @Override
+    List<String> header() {
+        return Tui.lines(body.stripTrailing());
+    }
+
+    @Override
+    String keys() {
+        return "R Refresh    D Test Discord connection    Esc Back";
+    }
+
+    @Override
+    boolean onKey(KeyStroke key) {
+        if (Tui.isChar(key, 'r') || Tui.isChar(key, 'd')) {
+            refresh(Tui.isChar(key, 'd'));
+            return true;
+        }
+        return super.onKey(key);
     }
 
     private void refresh(boolean connectDiscord) {
@@ -69,7 +70,7 @@ final class StatusScreen {
             sb.append("  ").append(settings.database()).append("  revision ").append(store.revision())
                     .append(" (").append(store.revisionUpdatedAt()).append(")\n");
         } catch (RuntimeException e) {
-            sb.append("  Error: ").append(Ui.message(e)).append('\n');
+            sb.append("  Error: ").append(Tui.message(e)).append('\n');
         }
 
         sb.append("\nDaemon\n");
@@ -104,9 +105,9 @@ final class StatusScreen {
             }
             try {
                 sb.append("authenticated as ")
-                        .append(Ui.busy(gui, "Checking " + p.displayName() + " authentication...", p::checkAuth)).append('\n');
+                        .append(tui.busy("Checking " + p.displayName() + " authentication...", p::checkAuth)).append('\n');
             } catch (RuntimeException e) {
-                sb.append("failed: ").append(Ui.message(e)).append('\n');
+                sb.append("failed: ").append(Tui.message(e)).append('\n');
             }
         }
         sb.append("  GitLab: not supported yet (Phase 5)\n");
@@ -114,9 +115,9 @@ final class StatusScreen {
         sb.append("\nDiscord (admin TUI connection)\n  ");
         if (connectDiscord) {
             try {
-                Ui.busy(gui, "Connecting to Discord...", discord::connect);
+                tui.busy("Connecting to Discord...", discord::connect);
             } catch (RuntimeException e) {
-                sb.append("failed: ").append(Ui.message(e)).append("\n  ");
+                sb.append("failed: ").append(Tui.message(e)).append("\n  ");
             }
         }
         sb.append(discord.statusText()).append('\n');
@@ -136,7 +137,7 @@ final class StatusScreen {
         }
         for (DiscordDestination d : destinations) {
             DestinationHealth h = health.get(d.id());
-            sb.append("  ").append(Ui.pad(d.name(), 28)).append(' ');
+            sb.append("  ").append(Tui.pad(d.name(), 28)).append(' ');
             if (h == null) {
                 sb.append("nothing sent yet");
             } else {
@@ -147,6 +148,6 @@ final class StatusScreen {
             }
             sb.append('\n');
         }
-        body.setText(sb.toString());
+        body = sb.toString();
     }
 }

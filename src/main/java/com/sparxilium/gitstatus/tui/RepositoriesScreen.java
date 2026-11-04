@@ -1,18 +1,9 @@
 package com.sparxilium.gitstatus.tui;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
-import com.googlecode.lanterna.TerminalSize;
-import com.googlecode.lanterna.gui2.ActionListBox;
-import com.googlecode.lanterna.gui2.BasicWindow;
-import com.googlecode.lanterna.gui2.CheckBoxList;
-import com.googlecode.lanterna.gui2.Direction;
-import com.googlecode.lanterna.gui2.EmptySpace;
-import com.googlecode.lanterna.gui2.Label;
-import com.googlecode.lanterna.gui2.LinearLayout;
-import com.googlecode.lanterna.gui2.Panel;
-import com.googlecode.lanterna.gui2.WindowBasedTextGUI;
+import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
 import com.sparxilium.gitstatus.db.ConfigStore;
 import com.sparxilium.gitstatus.model.Records.InstallationStatus;
@@ -20,169 +11,124 @@ import com.sparxilium.gitstatus.model.Records.ProviderInstallation;
 import com.sparxilium.gitstatus.model.Records.RepositoryRecord;
 import com.sparxilium.gitstatus.provider.GitProvider;
 
-/** 5.4 Repository selection: paged list from the provider API, Space subscribes, Enter opens event rules. */
+/** 5.4 Repository selection: list from the provider API, Space subscribes, Enter opens event rules. */
 final class RepositoriesScreen {
 
-    private static final int PAGE_SIZE = 15;
-
-    private final WindowBasedTextGUI gui;
+    private final Tui tui;
     private final ConfigStore store;
     private final List<GitProvider> providers;
 
-    RepositoriesScreen(WindowBasedTextGUI gui, ConfigStore store, List<GitProvider> providers) {
-        this.gui = gui;
+    private record Source(GitProvider provider, ProviderInstallation inst) {
+        @Override
+        public String toString() {
+            return provider.displayName() + " / " + inst.owner();
+        }
+    }
+
+    RepositoriesScreen(Tui tui, ConfigStore store, List<GitProvider> providers) {
+        this.tui = tui;
         this.store = store;
         this.providers = providers;
     }
 
     void show() {
-        BasicWindow w = Ui.window("Repositories / Notification Rules");
-        ActionListBox sources = new ActionListBox(new TerminalSize(50, 10));
+        List<Source> sources = new ArrayList<>();
         for (GitProvider p : providers) {
             for (ProviderInstallation inst : store.installations(p.id())) {
                 if (inst.status() == InstallationStatus.SELECTED) {
-                    sources.addItem(p.displayName() + " / " + inst.owner(), () -> openInstallation(p, inst));
+                    sources.add(new Source(p, inst));
                 }
             }
         }
-        Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
         if (sources.isEmpty()) {
-            panel.addComponent(new Label("No source selected. Select accounts / organizations under \"Git Provider Sources\" first."));
-        } else {
-            panel.addComponent(new Label("Select source"));
-            panel.addComponent(sources);
+            tui.info("Repositories / Notification Rules",
+                    "No source selected. Select accounts / organizations under \"Git Provider Sources\" first.");
+            return;
         }
-        panel.addComponent(new EmptySpace());
-        panel.addComponent(new Label("Enter: Open    Esc: Back"));
-        w.setComponent(panel);
-        Ui.onKeys(w, (win, key) -> false);
-        gui.addWindowAndWait(w);
+        while (true) {
+            Source source = tui.choose("Repositories / Notification Rules", "Select source", sources);
+            if (source == null) {
+                return;
+            }
+            openInstallation(source.provider(), source.inst());
+        }
     }
 
     private void openInstallation(GitProvider provider, ProviderInstallation inst) {
         String warning = "";
         try {
-            var repos = Ui.busy(gui, "Loading repositories...", () -> provider.listRepositories(inst));
+            var repos = tui.busy("Loading repositories...", () -> provider.listRepositories(inst));
             store.syncRepositories(inst.id(), repos);
         } catch (RuntimeException e) {
-            warning = "API failed, showing cached list: " + Ui.message(e);
+            warning = "API failed, showing cached list: " + Tui.message(e);
         }
-        new RepoList(provider, inst, warning).show();
+        RepoList list = new RepoList(provider, inst);
+        list.message = warning;
+        tui.show(list);
     }
 
-    private final class RepoList {
+    private final class RepoList extends Tui.View {
         private final GitProvider provider;
         private final ProviderInstallation inst;
-        private final CheckBoxList<Item> list = new CheckBoxList<>(new TerminalSize(64, PAGE_SIZE));
-        private final Label header = new Label("");
-        private final Label message;
         private List<RepositoryRecord> repos = List.of();
-        private int page;
-        private boolean suppress;
 
-        private record Item(RepositoryRecord repo) {
-            @Override
-            public String toString() {
-                String flag = repo.archived() ? "ARCHIVED" : repo.visibility();
-                return Ui.pad(repo.fullName(), 50) + " " + flag;
-            }
-        }
-
-        RepoList(GitProvider provider, ProviderInstallation inst, String warning) {
+        RepoList(GitProvider provider, ProviderInstallation inst) {
             this.provider = provider;
             this.inst = inst;
-            this.message = new Label(warning);
         }
 
-        void show() {
-            BasicWindow w = Ui.window("Repository");
-            Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
-            panel.addComponent(header);
-            panel.addComponent(list);
-            panel.addComponent(message);
-            panel.addComponent(new Label("Space: Enable/disable   Enter: Repo settings   Left/Right: Page   Esc: Back"));
-            w.setComponent(panel);
-
-            list.addListener((index, checked) -> {
-                if (suppress) {
-                    return;
-                }
-                RepositoryRecord r = list.getItemAt(index).repo();
-                try {
-                    store.setSubscribed(r.id(), checked);
-                    reloadData();
-                } catch (RuntimeException e) {
-                    Ui.error(gui, "Save failed: " + Ui.message(e));
-                    reloadData();
-                    render();
-                }
-            });
-            Ui.onKeys(w, (win, key) -> {
-                if (key.getKeyType() == KeyType.Enter) {
-                    Item selected = list.getSelectedItem();
-                    if (selected != null) {
-                        openEvents(selected.repo());
-                    }
-                    return true;
-                }
-                if (key.getKeyType() == KeyType.ArrowLeft) {
-                    turnPage(-1);
-                    return true;
-                }
-                if (key.getKeyType() == KeyType.ArrowRight) {
-                    turnPage(1);
-                    return true;
-                }
-                return false;
-            });
-            reloadData();
-            render();
-            gui.addWindowAndWait(w);
+        @Override
+        String title() {
+            return "Repositories / Notification Rules";
         }
 
-        private int pageCount() {
-            return Math.max(1, (repos.size() + PAGE_SIZE - 1) / PAGE_SIZE);
-        }
-
-        private void turnPage(int delta) {
-            int next = Math.max(0, Math.min(pageCount() - 1, page + delta));
-            if (next != page) {
-                page = next;
-                render();
-            }
-        }
-
-        private void reloadData() {
-            repos = store.repositories(inst.id());
-            page = Math.min(page, pageCount() - 1);
-        }
-
-        private void render() {
+        @Override
+        List<String> header() {
             String type = "Organization".equals(inst.type()) ? "Organization" : "User";
-            header.setText(type + ": " + inst.owner() + "    Page " + (page + 1) + "/" + pageCount()
-                    + "    (" + repos.size() + " repos)");
-            suppress = true;
-            try {
-                int selected = list.getSelectedIndex();
-                list.clearItems();
-                int from = page * PAGE_SIZE;
-                for (RepositoryRecord r : repos.subList(Math.min(from, repos.size()), Math.min(from + PAGE_SIZE, repos.size()))) {
-                    list.addItem(new Item(r), r.subscribed());
-                }
-                if (!list.isEmpty()) {
-                    list.setSelectedIndex(Math.max(0, Math.min(selected, list.getItemCount() - 1)));
-                }
-            } finally {
-                suppress = false;
+            long enabled = repos.stream().filter(RepositoryRecord::subscribed).count();
+            List<String> lines = new ArrayList<>();
+            lines.add(type + ": " + inst.owner() + "    (" + repos.size() + " repos, " + enabled + " enabled)");
+            if (repos.isEmpty()) {
+                lines.add("");
+                lines.add("No repository. Add repositories to the GitHub App installation first.");
             }
+            return lines;
         }
 
-        private void openEvents(RepositoryRecord repo) {
-            Optional<RepositoryRecord> fresh = repos.stream().filter(r -> r.id() == repo.id()).findFirst();
-            ProviderInstallation current = store.installation(inst.id()).orElse(inst);
-            new RepoEventsScreen(gui, store, provider, current, fresh.orElse(repo)).show();
-            reloadData();
-            render();
+        @Override
+        List<String> rows() {
+            repos = store.repositories(inst.id());
+            return repos.stream()
+                    .map(r -> Tui.checkbox(r.subscribed()) + Tui.pad(r.fullName(), 50) + " "
+                            + (r.archived() ? "ARCHIVED" : r.visibility()))
+                    .toList();
+        }
+
+        @Override
+        String keys() {
+            return "Up/Down Move    Space Enable/disable    Enter Event settings    Esc Back";
+        }
+
+        @Override
+        boolean onKey(KeyStroke key) {
+            if (cursor >= repos.size()) {
+                return super.onKey(key);
+            }
+            RepositoryRecord repo = repos.get(cursor);
+            if (Tui.isSpace(key)) {
+                try {
+                    store.setSubscribed(repo.id(), !repo.subscribed());
+                } catch (RuntimeException e) {
+                    message = "Save failed: " + Tui.message(e);
+                }
+                return true;
+            }
+            if (key.getKeyType() == KeyType.Enter) {
+                ProviderInstallation current = store.installation(inst.id()).orElse(inst);
+                new RepoEventsScreen(tui, store, provider, current, repo).show();
+                return true;
+            }
+            return super.onKey(key);
         }
     }
 }

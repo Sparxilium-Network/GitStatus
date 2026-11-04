@@ -15,7 +15,7 @@
 
 - Java 25、Spring Boot 4.1、Maven
 - JDA 6（只發送訊息，不註冊指令、不監聽訊息、不用 privileged intent）
-- Lanterna 3（Admin TUI）
+- Lanterna 3（Admin TUI 的鍵盤輸入；畫面是自繪純文字，見 `tui.Tui`）
 - SQLite + `JdbcTemplate`（不使用 ORM）
 - Jackson 3（套件為 `tools.jackson.*`，方法名為 `asString()` 等）
 
@@ -54,7 +54,7 @@ mvn -DskipTests package
 | `routing` | `RuleSet` 快照、載入驗證、revision 輪詢與原子替換 |
 | `notify` | `Sanitizer`、`MessageFormatter`、`DiscordGateway`、`NotificationDispatcher` |
 | `webhook` | `WebhookController`（HTTP）與 `WebhookService`（流程） |
-| `tui` | Lanterna 畫面 |
+| `tui` | 純文字 Admin TUI：`Tui` 繪製與對話框，畫面繼承 `Tui.View`；不要用 Lanterna 視窗元件或依賴畫面大小 |
 
 ## 不可破壞的設計約束
 

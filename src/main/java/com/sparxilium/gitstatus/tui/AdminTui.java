@@ -7,19 +7,11 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import com.googlecode.lanterna.TerminalSize;
-import com.googlecode.lanterna.TextColor;
-import com.googlecode.lanterna.gui2.ActionListBox;
-import com.googlecode.lanterna.gui2.BasicWindow;
-import com.googlecode.lanterna.gui2.DefaultWindowManager;
-import com.googlecode.lanterna.gui2.Direction;
-import com.googlecode.lanterna.gui2.EmptySpace;
-import com.googlecode.lanterna.gui2.Label;
-import com.googlecode.lanterna.gui2.LinearLayout;
-import com.googlecode.lanterna.gui2.MultiWindowTextGUI;
-import com.googlecode.lanterna.gui2.Panel;
-import com.googlecode.lanterna.screen.Screen;
+import com.googlecode.lanterna.input.KeyStroke;
+import com.googlecode.lanterna.input.KeyType;
 import com.googlecode.lanterna.terminal.DefaultTerminalFactory;
+import com.googlecode.lanterna.terminal.Terminal;
+import com.googlecode.lanterna.terminal.ansi.UnixTerminal;
 import com.sparxilium.gitstatus.GitStatusApplication;
 import com.sparxilium.gitstatus.config.AppSettings;
 import com.sparxilium.gitstatus.db.ConfigStore;
@@ -45,35 +37,55 @@ public class AdminTui implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        DefaultTerminalFactory factory = new DefaultTerminalFactory(System.out, System.in, StandardCharsets.UTF_8);
+        Terminal terminal;
         if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
+            DefaultTerminalFactory factory = new DefaultTerminalFactory(System.out, System.in, StandardCharsets.UTF_8);
             factory.setPreferTerminalEmulator(true); // local development only
+            terminal = factory.createTerminal();
         } else {
-            factory.setForceTextTerminal(true);
+            terminal = new UnixTerminal(System.in, System.out, StandardCharsets.UTF_8);
         }
-        try (Screen screen = factory.createScreen()) {
-            screen.startScreen();
-            MultiWindowTextGUI gui = new MultiWindowTextGUI(screen, new DefaultWindowManager(), new EmptySpace(TextColor.ANSI.BLUE));
-            mainMenu(gui);
-            screen.stopScreen();
+        try (terminal) {
+            terminal.enterPrivateMode();
+            try {
+                mainMenu(new Tui(terminal));
+            } finally {
+                terminal.exitPrivateMode();
+            }
         }
     }
 
-    private void mainMenu(MultiWindowTextGUI gui) {
-        BasicWindow w = Ui.window("Git Notification Manager");
-        ActionListBox menu = new ActionListBox(new TerminalSize(40, 5));
-        menu.addItem("Discord Destinations", () -> new DestinationsScreen(gui, store, discord).show());
-        menu.addItem("Git Provider Sources", () -> new SourcesScreen(gui, store, providers).show());
-        menu.addItem("Repositories / Notification Rules", () -> new RepositoriesScreen(gui, store, providers).show());
-        menu.addItem("System Status", () -> new StatusScreen(gui, store, discord, providers, settings).show());
-        menu.addItem("Exit", w::close);
+    void mainMenu(Tui tui) {
+        List<String> items = List.of("Discord Destinations", "Git Provider Sources", "Repositories / Notification Rules",
+                "System Status", "Exit");
+        tui.show(new Tui.View() {
+            String title() {
+                return "Git Notification Manager";
+            }
 
-        Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
-        panel.addComponent(menu);
-        panel.addComponent(new EmptySpace());
-        panel.addComponent(new Label("Up/Down: Select    Enter: Confirm    Esc: Back"));
-        w.setComponent(panel);
-        Ui.onKeys(w, (win, key) -> false);
-        gui.addWindowAndWait(w);
+            List<String> rows() {
+                return items;
+            }
+
+            String keys() {
+                return "Up/Down Move    Enter Select    Esc Exit";
+            }
+
+            boolean onKey(KeyStroke key) {
+                if (key.getKeyType() != KeyType.Enter) {
+                    return super.onKey(key);
+                }
+                switch (cursor) {
+                    case 0 -> new DestinationsScreen(tui, store, discord).show();
+                    case 1 -> new SourcesScreen(tui, store, providers).show();
+                    case 2 -> new RepositoriesScreen(tui, store, providers).show();
+                    case 3 -> new StatusScreen(tui, store, discord, providers, settings).show();
+                    default -> {
+                        return false;
+                    }
+                }
+                return true;
+            }
+        });
     }
 }

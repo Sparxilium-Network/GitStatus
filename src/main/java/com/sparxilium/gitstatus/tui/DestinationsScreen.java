@@ -1,17 +1,11 @@
 package com.sparxilium.gitstatus.tui;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.googlecode.lanterna.TerminalSize;
-import com.googlecode.lanterna.gui2.ActionListBox;
-import com.googlecode.lanterna.gui2.BasicWindow;
-import com.googlecode.lanterna.gui2.Direction;
-import com.googlecode.lanterna.gui2.EmptySpace;
-import com.googlecode.lanterna.gui2.Label;
-import com.googlecode.lanterna.gui2.LinearLayout;
-import com.googlecode.lanterna.gui2.Panel;
-import com.googlecode.lanterna.gui2.WindowBasedTextGUI;
+import com.googlecode.lanterna.input.KeyStroke;
+import com.googlecode.lanterna.input.KeyType;
 import com.sparxilium.gitstatus.db.ConfigStore;
 import com.sparxilium.gitstatus.model.Language;
 import com.sparxilium.gitstatus.model.Records.DestinationHealth;
@@ -20,77 +14,103 @@ import com.sparxilium.gitstatus.notify.DiscordGateway;
 import com.sparxilium.gitstatus.notify.DiscordGateway.ChannelInfo;
 import com.sparxilium.gitstatus.notify.DiscordGateway.GuildInfo;
 import com.sparxilium.gitstatus.notify.DiscordMessage;
-import com.sparxilium.gitstatus.notify.MessageFormatter;
 import com.sparxilium.gitstatus.notify.DiscordSender.SendException;
+import com.sparxilium.gitstatus.notify.MessageFormatter;
 
 /** 5.2 Discord destinations. */
-final class DestinationsScreen {
+final class DestinationsScreen extends Tui.View {
 
-    private final WindowBasedTextGUI gui;
+    private static final String ADD_FROM_LIST = "+ Add destination (pick from channels visible to the bot)";
+    private static final String ADD_MANUAL = "+ Add destination (enter Channel ID manually)";
+
+    private final Tui tui;
     private final ConfigStore store;
     private final DiscordGateway discord;
-    private final ActionListBox list = new ActionListBox(new TerminalSize(72, 14));
+    private List<DiscordDestination> destinations = List.of();
+    private Map<Long, DestinationHealth> health = Map.of();
 
-    DestinationsScreen(WindowBasedTextGUI gui, ConfigStore store, DiscordGateway discord) {
-        this.gui = gui;
+    DestinationsScreen(Tui tui, ConfigStore store, DiscordGateway discord) {
+        this.tui = tui;
         this.store = store;
         this.discord = discord;
     }
 
     void show() {
-        BasicWindow w = Ui.window("Discord Destinations");
-        Panel panel = new Panel(new LinearLayout(Direction.VERTICAL));
-        panel.addComponent(list);
-        panel.addComponent(new EmptySpace());
-        panel.addComponent(new Label("Enter: Select / actions    Esc: Back"));
-        w.setComponent(panel);
-        Ui.onKeys(w, (win, key) -> false);
-        refresh();
-        gui.addWindowAndWait(w);
+        tui.show(this);
     }
 
-    private void refresh() {
-        int selected = list.getSelectedIndex();
-        list.clearItems();
-        Map<Long, DestinationHealth> health = store.destinationHealth();
-        for (DiscordDestination d : store.destinations()) {
+    @Override
+    String title() {
+        return "Discord Destinations";
+    }
+
+    @Override
+    List<String> header() {
+        return destinations.isEmpty() ? List.of("No destination yet.")
+                : List.of("    " + Tui.pad("Name", 24) + " " + Tui.pad("Channel", 26) + " " + Tui.pad("Lang", 6) + "State");
+    }
+
+    @Override
+    List<String> rows() {
+        destinations = store.destinations();
+        health = store.destinationHealth();
+        List<String> rows = new ArrayList<>();
+        for (DiscordDestination d : destinations) {
             DestinationHealth h = health.get(d.id());
-            String state = !d.enabled() ? "disabled" : h == null ? "enabled" : "FAILED".equals(h.status()) ? "FAILED" : h.status();
-            String label = Ui.pad(d.name(), 24) + " " + Ui.pad("ch " + d.channelId(), 26) + " " + Ui.pad(d.language().code(), 6)
-                    + "[" + state + "]";
-            list.addItem(label, () -> destinationActions(d, h));
+            String state = !d.enabled() ? "disabled" : h == null ? "enabled" : h.status();
+            rows.add(Tui.pad(d.name(), 24) + " " + Tui.pad("ch " + d.channelId(), 26) + " "
+                    + Tui.pad(d.language().code(), 6) + state);
         }
-        list.addItem("+ Add destination (pick from channels visible to the bot)", this::addFromList);
-        list.addItem("+ Add destination (enter Channel ID manually)", this::addManual);
-        if (selected >= 0 && selected < list.getItemCount()) {
-            list.setSelectedIndex(selected);
+        rows.add(ADD_FROM_LIST);
+        rows.add(ADD_MANUAL);
+        return rows;
+    }
+
+    @Override
+    String keys() {
+        return "Up/Down Move    Enter Select / actions    Esc Back";
+    }
+
+    @Override
+    boolean onKey(KeyStroke key) {
+        if (key.getKeyType() != KeyType.Enter) {
+            return super.onKey(key);
         }
+        if (cursor < destinations.size()) {
+            DiscordDestination d = destinations.get(cursor);
+            destinationActions(d, health.get(d.id()));
+        } else if (cursor == destinations.size()) {
+            addFromList();
+        } else {
+            addManual();
+        }
+        return true;
     }
 
     private void addFromList() {
         List<GuildInfo> guilds;
         try {
-            guilds = Ui.busy(gui, "Connecting to Discord...", discord::guilds);
+            guilds = tui.busy("Connecting to Discord...", discord::guilds);
         } catch (RuntimeException e) {
-            Ui.error(gui, Ui.message(e));
+            tui.error(Tui.message(e));
             return;
         }
         if (guilds.isEmpty()) {
-            Ui.info(gui, "Discord", "The bot has not joined any guild yet.");
+            tui.info("Discord", "The bot has not joined any guild yet.");
             return;
         }
-        GuildLabel guild = Ui.choose(gui, "Select guild", "Discord servers the bot has joined",
-                guilds.stream().map(GuildLabel::new).toArray(GuildLabel[]::new));
+        GuildLabel guild = tui.choose("Select guild", "Discord servers the bot has joined",
+                guilds.stream().map(GuildLabel::new).toList());
         if (guild == null) {
             return;
         }
         List<ChannelInfo> channels = discord.sendableChannels(guild.info().id());
         if (channels.isEmpty()) {
-            Ui.info(gui, "Discord", "No channel in this guild where the bot can View / Send / Embed Links.");
+            tui.info("Discord", "No channel in this guild where the bot can View / Send / Embed Links.");
             return;
         }
-        ChannelLabel channel = Ui.choose(gui, "Select channel", guild.info().name(),
-                channels.stream().map(ChannelLabel::new).toArray(ChannelLabel[]::new));
+        ChannelLabel channel = tui.choose("Select channel", guild.info().name(),
+                channels.stream().map(ChannelLabel::new).toList());
         if (channel == null) {
             return;
         }
@@ -98,31 +118,30 @@ final class DestinationsScreen {
     }
 
     private void addManual() {
-        String id = Ui.input(gui, "Manual entry", "Discord Channel ID (digits)", "");
+        String id = tui.input("Manual entry", "Discord Channel ID (digits)", "");
         if (id == null) {
             return;
         }
         id = id.trim();
         if (!id.matches("\\d{15,25}")) {
-            Ui.error(gui, "Invalid Channel ID.");
+            tui.error("Invalid Channel ID.");
             return;
         }
         String channelId = id;
         ChannelInfo info;
         try {
-            info = Ui.busy(gui, "Connecting to Discord...", () -> discord.channel(channelId).orElse(null));
+            info = tui.busy("Connecting to Discord...", () -> discord.channel(channelId).orElse(null));
         } catch (RuntimeException e) {
-            Ui.error(gui, Ui.message(e));
+            tui.error(Tui.message(e));
             return;
         }
         if (info == null) {
-            if (!Ui.confirm(gui, "Channel not found", "The bot cannot see this channel. Save anyway?")) {
-                return;
+            if (tui.confirm("Channel not found", "The bot cannot see this channel. Save anyway?")) {
+                save(null, channelId, "channel " + channelId);
             }
-            save(null, channelId, "channel " + channelId);
             return;
         }
-        if (!info.sendable() && !Ui.confirm(gui, "Missing permission",
+        if (!info.sendable() && !tui.confirm("Missing permission",
                 "The bot lacks View / Send / Embed Links in this channel. Save anyway?")) {
             return;
         }
@@ -130,7 +149,7 @@ final class DestinationsScreen {
     }
 
     private void save(String guildId, String channelId, String suggestedName) {
-        String name = Ui.input(gui, "Destination name", "Custom destination_name", suggestedName);
+        String name = tui.input("Destination name", "Custom destination_name", suggestedName);
         if (name == null || name.isBlank()) {
             return;
         }
@@ -140,11 +159,10 @@ final class DestinationsScreen {
         }
         try {
             store.addDestination(name.trim(), guildId, channelId, language);
+            message = "Saved \"" + name.trim() + "\"";
         } catch (RuntimeException e) {
-            Ui.error(gui, "Save failed (name may already exist): " + Ui.message(e));
-            return;
+            tui.error("Save failed (name may already exist): " + Tui.message(e));
         }
-        refresh();
     }
 
     private void destinationActions(DiscordDestination d, DestinationHealth h) {
@@ -156,7 +174,7 @@ final class DestinationsScreen {
         String toggle = d.enabled() ? "Disable" : "Enable";
         String reset = "Reset failure state";
         String delete = "Delete";
-        String action = Ui.choose(gui, d.name(), detail, test, language, toggle, reset, delete);
+        String action = tui.choose(d.name(), detail, List.of(test, language, toggle, reset, delete));
         if (action == null) {
             return;
         }
@@ -173,23 +191,22 @@ final class DestinationsScreen {
             } else if (action.equals(reset)) {
                 store.resetDestinationHealth(d.id());
             } else if (action.equals(delete)
-                    && Ui.confirm(gui, "Delete", "Delete \"" + d.name() + "\" and all of its notification rules?")) {
+                    && tui.confirm("Delete", "Delete \"" + d.name() + "\" and all of its notification rules?")) {
                 store.deleteDestination(d.id());
             }
         } catch (RuntimeException e) {
-            Ui.error(gui, Ui.message(e));
+            tui.error(Tui.message(e));
         }
-        refresh();
     }
 
     private Language chooseLanguage() {
-        return Ui.choose(gui, "Notification language", "Language of messages sent to this channel", Language.values());
+        return tui.choose("Notification language", "Language of messages sent to this channel", List.of(Language.values()));
     }
 
     private void sendTest(DiscordDestination d) {
         DiscordMessage msg = MessageFormatter.testMessage(d.name(), d.language());
         try {
-            Ui.busy(gui, "Sending...", () -> {
+            tui.busy("Sending...", () -> {
                 try {
                     discord.send(d, msg);
                     return null;
@@ -197,9 +214,9 @@ final class DestinationsScreen {
                     throw new IllegalStateException(e.getMessage());
                 }
             });
-            Ui.info(gui, "Done", "Test message sent.");
+            message = "Test message sent to " + d.name() + ".";
         } catch (RuntimeException e) {
-            Ui.error(gui, "Send failed: " + Ui.message(e));
+            tui.error("Send failed: " + Tui.message(e));
         }
     }
 

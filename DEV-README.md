@@ -11,7 +11,7 @@
 | 框架 | Spring Boot 4.1（`spring-boot-starter-webmvc`、`spring-boot-starter-jdbc`） |
 | JSON | Jackson 3（`tools.jackson.*`，`asString()` 等新方法名） |
 | Discord | JDA 6：只發送，無指令、無訊息監聽、無 privileged intent |
-| TUI | Lanterna 3 |
+| TUI | Lanterna 3（只用於鍵盤輸入與游標控制，畫面為自繪純文字） |
 | 資料庫 | SQLite（WAL、`busy_timeout=5000`、`transaction_mode=IMMEDIATE`）+ `JdbcTemplate`，不用 ORM |
 | GitHub 認證 | GitHub App：RS256 JWT（自行簽章，支援 PKCS#1 / PKCS#8）→ Installation token（僅存於記憶體） |
 
@@ -57,7 +57,7 @@ Admin TUI ──▶ ConfigStore.mutate (transaction + revision+1) ──▶ SQLi
 | `routing` | `RuleSet`（不可變快照）、`RuleSetLoader`（載入 + 驗證）、`RuleSetHolder`（輪詢 + 原子替換） |
 | `notify` | `Sanitizer`、`MessageFormatter`、`DiscordGateway`、`NotificationDispatcher` |
 | `webhook` | `WebhookController`（HTTP）、`WebhookService`（流程） |
-| `tui` | Lanterna 畫面（英文介面） |
+| `tui` | 純文字 Admin TUI（英文介面）；`Tui` 負責繪製與對話框，各畫面繼承 `Tui.View` |
 
 ## 資料模型
 
@@ -141,6 +141,7 @@ mvn -DskipTests package
 | `SchemaMigrationTest` | 舊資料庫補上 `language` 欄位 |
 | `DatabaseWritableCheckTest` | 資料目錄自動建立、無法建立或唯讀時回報 `StartupCheckException` |
 | `AppSettingsTest` | `setupProblems()` 列出缺少的設定與 secret，不含內容 |
+| `TuiTest` | 虛擬終端機：畫面從左上角繪製、游標與 `[*]` 勾選、長清單捲動、選擇 / 確認 / 輸入對話框、輸入結束時停止 |
 | `ClientIpResolverTest` | CIDR 比對（v4 / v6）、`/proc/net/route` gateway 解析、只信任 trusted proxy 的 header、不做 DNS 誤判 |
 | `WebhookPipelineTest` | 真實 SQLite 端到端：路由、多目的地、各自語言、去重、錯誤簽章、來源驗證（含 fail-closed 與沿用已存清單）、reload、停用 / 未訂閱 / 撤銷授權 |
 
@@ -153,6 +154,8 @@ GITSTATUS_CONFIG=C:/path/to/config.conf java -jar target/gitstatus.jar run
 ```
 
 Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker 內使用真實終端機（需要 TTY）。
+
+TUI 畫面是逐行從左上角輸出的純文字（`=====` 分隔線、`>` 游標、`[*]` / `[ ]` 勾選、底部按鍵說明），不使用 Lanterna 的視窗元件，也不依賴終端機回報的畫面大小。透過 SSH 時有些終端機回報的大小不正確，舊版置中視窗會畫在可見範圍外而看起來一片空白。清單超過 15 列時隨游標捲動。
 
 ## Log
 
