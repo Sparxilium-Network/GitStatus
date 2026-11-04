@@ -124,10 +124,10 @@ paste_pem() {
 bold "2/5  GitHub App private key"
 cat <<'EOF'
   Where to get it: GitHub -> Settings -> Developer settings -> GitHub Apps -> your app -> Edit
-  -> General. Keep scrolling down past "Webhook", "Display information" and "IP allow list"
-  (or press Ctrl+F and search "Private keys") -> "Generate a private key".
-  Your browser downloads a file named like:  my-app.2026-11-05.private-key.pem
-  The short code listed on that page (SHA256:...) is only a fingerprint, not the key.
+  -> left sidebar "Credentials" -> "Key pairs" -> "New key".
+  (Older GitHub pages: General -> "Private keys" -> "Generate a private key".)
+  Your browser downloads a .pem file, e.g.  my-app.2026-11-05.private-key.pem
+  The short code listed for each key (SHA256:...) is only a fingerprint, not the key.
 EOF
 if ! keep_existing "$KEY" "The private key"; then
   found=$(find "$USER_HOME" "$PWD" -maxdepth 2 -name '*.private-key.pem' -type f 2>/dev/null | head -n 1 || true)
