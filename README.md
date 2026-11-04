@@ -229,3 +229,11 @@ cp config/config.conf ~/config.conf.bak && git checkout -- config/config.conf
 ```bash
 git pull && cp ~/config.conf.bak config/config.conf && sudo ./setup.sh
 ```
+
+**`sed: read error on config/config.conf: Is a directory`**：`config/config.conf` 還不存在時就執行了 `docker compose up`，Docker 會把它建立成一個**空目錄**。新版 `setup.sh` 會自動移除這個目錄並重新建立設定檔；舊版請手動處理：
+
+```bash
+sudo rm -rf config/config.conf && sudo ./setup.sh
+```
+
+如果有照上面的步驟備份過 `~/config.conf.bak`，先用 `cp ~/config.conf.bak config/config.conf` 放回去再執行 `setup.sh`。

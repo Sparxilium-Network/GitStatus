@@ -80,6 +80,19 @@ mkdir -p data "$APPS"
 # ---- config.conf: create it, or upgrade it to CONFIG_VERSION ----------------
 # A release that adds or renames settings raises CONFIG_VERSION (and ConfigVersionCheck.CURRENT in
 # the Java code) and adds a step below that edits existing files in place.
+# docker compose creates an empty directory for a bind-mounted file that does not exist yet
+# (for example when it was started before setup.sh); an older setup.sh then copied the example
+# into that directory. Only remove it when it holds nothing else.
+if [ -d "$CONFIG" ]; then
+  leftover=$(find "$CONFIG" -mindepth 1 ! -name "$(basename "$CONFIG_EXAMPLE")" ! -name "$(basename "$CONFIG")" -print -quit)
+  [ -z "$leftover" ] || fail "$CONFIG is a directory with other files in it ($leftover). Move them out, remove the directory and run this script again."
+  for f in "$CONFIG"/*; do
+    [ -e "$f" ] || continue
+    cmp -s "$f" "$CONFIG_EXAMPLE" || fail "$CONFIG is a directory containing $f, which differs from $CONFIG_EXAMPLE. Move it out, remove the directory and run this script again."
+  done
+  rm -rf -- "$CONFIG"
+  warn "Removed $CONFIG: it was a directory created by docker compose, not a file"
+fi
 if [ ! -f "$CONFIG" ]; then
   install -m 644 "$CONFIG_EXAMPLE" "$CONFIG"
   ok "Created $CONFIG from $CONFIG_EXAMPLE"
