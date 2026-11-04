@@ -190,6 +190,21 @@ GitHub → Cloudflare → 使用者的 cloudflared（主機上）→ 127.0.0.1:3
 - `HEALTHCHECK` 以 bash `/dev/tcp` 呼叫 `/health`。
 - JAR manifest 含 `Enable-Native-Access: ALL-UNNAMED`（sqlite-jdbc 載入 native library）。
 
+### `deploy/setup.sh`
+
+使用者的設定精靈（需 root，非 root 時自動以 `sudo` 重新執行）：
+
+1. 把 App ID 寫入 `config/config.conf` 的 `github.appId`（範本預設為空）。
+2. 複製 `.pem` 到 `secrets/github-app.pem`；檢查內容含 `PRIVATE KEY-----`。
+3. Webhook secret 以 `read -s` 輸入兩次；留空時從 `/dev/urandom` 產生 32 bytes hex 並顯示一次。
+4. Discord token 以 `read -s` 輸入，檢查三段式格式（不符時可確認後仍使用）。
+5. `chown -R 10001:10001 data secrets`、目錄 700、secret 400、`config.conf` 644。
+6. 選擇啟動時執行 `docker compose up -d --build --force-recreate`（bind mount 的檔案變更需要重建容器），最多等 90 秒 `/health`；失敗時印出最近 40 行 log。
+
+Secret 以 `printf '%s'` 寫入（無換行、`umask 077`），不出現在指令列參數或 shell history。重複執行時已存在的檔案預設保留，所以也可以當作「修正權限」使用。
+
+不使用精靈時的手動做法：目錄結構與權限見 `deploy/docker-compose.yml` 開頭的註解。
+
 ## 設定檔（`config.conf`）
 
 | Key | 預設 | 說明 |

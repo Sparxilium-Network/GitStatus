@@ -60,7 +60,7 @@ https://git-hooks.example.com/webhooks/github
 到 GitHub → Settings → Developer settings → GitHub Apps → New GitHub App：
 
 - **Webhook URL**：步驟 1 的網址
-- **Webhook secret**：自訂一串隨機字串，等一下要用。
+- **Webhook secret**：自訂一串隨機字串，等一下要用。也可以先留空，步驟 4 的 `setup.sh` 會幫你產生一組，再貼回這裡。
 - **Repository permissions**（全部選 **Read-only**）：Metadata、Contents、Actions、Pull requests
 - **Subscribe to events**：Push、Pull request、Workflow run、Release
 - 建立後記下 **App ID**，並產生、下載 **Private key**（`.pem` 檔）。
@@ -75,42 +75,50 @@ https://git-hooks.example.com/webhooks/github
 - 用 OAuth2 URL Generator 產生邀請連結：Scope 只勾 `bot`，權限勾 **View Channels**、**Send Messages**、**Embed Links**。
 - 用連結把 Bot 邀請到你的 Discord Server。
 
-### 4. 在伺服器上準備檔案
+### 4. 在伺服器上執行設定精靈
 
-把專案原始碼放到伺服器上（例如 `/opt/git-notifier`），之後的操作都在其中的 `deploy/` 目錄進行：
-
-```
-/opt/git-notifier/deploy/
-├── docker-compose.yml        ← 已附上，不需修改
-├── config/config.conf        ← 填入步驟 2 的 App ID
-├── data/                     ← 自行建立，資料庫會放在這裡
-└── secrets/                  ← 自行建立
-    ├── github-app.pem         ← 步驟 2 下載的 Private key
-    ├── github-webhook-secret  ← 步驟 2 自訂的 Webhook secret
-    └── discord-token          ← 步驟 3 的 Bot Token
-```
-
-在 `deploy/` 目錄設定檔案權限：
+先把步驟 2 下載的 Private key（`.pem` 檔）傳到伺服器，例如在你的電腦上執行：
 
 ```bash
-sudo chown -R 10001:10001 data secrets && sudo chmod 700 data secrets && sudo chmod 400 secrets/*
+scp ~/Downloads/your-app.2026-01-01.private-key.pem user@your-server:~/
 ```
 
-### 5. 啟動通知服務
-
-第一次啟動會從原始碼建置 image（需要幾分鐘）：
+在伺服器上取得專案原始碼：
 
 ```bash
-docker compose up -d --build
+git clone https://github.com/Sparxilium-Network/GitStatus.git
 ```
 
-確認服務正常（在伺服器上執行）：
+進入 `deploy/` 目錄執行設定精靈：
+
+```bash
+cd GitStatus/deploy && sudo ./setup.sh
+```
+
+精靈會依序詢問：
+
+| 步驟 | 要輸入的內容 |
+|---|---|
+| 1. GitHub App ID | 步驟 2 記下的 App ID |
+| 2. Private key | `.pem` 檔的路徑。家目錄裡的 `*.private-key.pem` 會自動帶入，直接按 Enter 即可；複製後可選擇刪除原檔 |
+| 3. Webhook secret | 步驟 2 自訂的字串（輸入兩次確認）。留空會產生一組新的，請貼回 GitHub App 設定 |
+| 4. Discord Bot Token | 步驟 3 複製的 Token |
+
+輸入 secret 與 Token 時畫面不會顯示，也不會留在指令歷史紀錄裡。
+
+接著精靈會自動設定好檔案擁有者與權限，並詢問是否啟動服務。選擇啟動後會建置 image（第一次需要幾分鐘），並等到服務正常運作才結束。看到 `OK  The service is running.` 就完成了。
+
+之後要更換 Token 或 secret、或遇到權限問題，再執行一次 `sudo ./setup.sh` 即可；要保留的項目直接按 Enter。
+
+### 5. 確認服務正常
+
+在伺服器上執行：
 
 ```bash
 curl http://127.0.0.1:33444/health
 ```
 
-看到 `{"status":"UP"}` 就代表啟動成功。
+看到 `{"status":"UP"}` 就代表服務正常。
 
 ### 6. 設定 Cloudflare Tunnel
 
@@ -163,7 +171,7 @@ GitHub App 沒有被授權存取它。到 GitHub 的 App 安裝設定中把它�
 到 **System Status** 查看該頻道的發送結果。如果顯示 `FAILED`，通常是 Bot 被移出頻道或缺少權限；修正後在 **Discord Destinations** 選擇該頻道 → **Reset failure state**。
 
 **Discord 顯示 `ERROR ... discord-token`**
-`secrets/discord-token` 不存在或無法讀取，請檢查檔案與權限。
+`secrets/discord-token` 不存在或無法讀取。在 `deploy/` 目錄執行 `sudo ./setup.sh` 重新輸入 Token。
 
 **GitHub 的 Recent Deliveries 顯示 `403`**
 請求沒有通過來源驗證。到 **System Status** 看 `Source verification` 那一行：
@@ -183,10 +191,10 @@ Webhook secret 不一致。確認 `secrets/github-webhook-secret` 與 GitHub App
 
 ## 更新版本
 
-取得新版原始碼後重新建置並啟動：
+在 `deploy/` 目錄取得新版原始碼後重新建置並啟動：
 
 ```bash
-docker compose up -d --build
+git pull && docker compose up -d --build
 ```
 
 更新時資料庫會自動升級，既有設定都會保留。
