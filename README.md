@@ -127,9 +127,10 @@ curl http://127.0.0.1:33444/health
 
 依照 [Cloudflare Tunnel 設定教學](docs/CLOUDFLARE-TUNNEL.md) 建立 Tunnel：
 
-- **HOSTNAME**：步驟 1 的子網域
-- **Path**：`webhooks/github`
-- **Service**：`http://localhost:33444`
+- 路由類型：**已發佈的應用程式**（Published application）
+- **子網域 / 網域**：步驟 1 的網址
+- **路徑**：`^/webhooks/github$`
+- **服務 URL**：`http://localhost:33444`
 
 教學最後的「驗證」會帶你確認 Tunnel 已接通，以及 GitHub 重送的 `ping` 回應為 `202`。
 

@@ -53,23 +53,28 @@ curl http://127.0.0.1:33444/health
    sudo cloudflared service install eyJhIjoiNDU2...（很長一串）
    ```
    複製 `install` 後面那一長串，這就是你的 **Tunnel token**。先存起來，**不要外流**。
-4. 按 **Next**，進入 **Public Hostname**（路由）設定。
+4. 進入路由設定，按 **新增路由**（Add route）。
 
 > Cloudflare 的介面名稱偶爾會調整，找不到時以 Tunnels 頁面內的說明為準。
 
-### A-2. 設定 Public Hostname
+### A-2. 新增路由
 
-| 欄位 | 填入 |
-|---|---|
-| Subdomain | `SUBDOMAIN` |
-| Domain | `DOMAIN` |
-| Path | `webhooks/github` |
-| Service Type | `HTTP` |
-| Service URL | `localhost:33444` |
+1. 路由類型選 **已發佈的應用程式**（Published application）。另外三種（私有主機名稱、私有 CIDR、Workers VPC）是給內部網路用的，這裡用不到。
+2. 依下表填寫：
 
-按 **Save**。Cloudflare 會自動建立 DNS 紀錄。
+| 欄位 | 填入 | 說明 |
+|---|---|---|
+| 子網域（Subdomain） | `SUBDOMAIN` | 例如 `git-hooks` |
+| 網域（Domain） | `DOMAIN` | 從下拉選單選擇 |
+| 路徑（Path） | `^/webhooks/github$` | 正規表達式，只讓 webhook 路徑通過 |
+| 服務 URL（Service URL） | `http://localhost:33444` | 開頭要寫 `http://`，**不是** `https://` |
 
-**Path 一定要填。** 填了之後只有 webhook 路徑對外，其他路徑（例如 `/health`）都不會公開。
+3. 確認 **完整主機名稱** 顯示的是你的 `HOSTNAME`（例如 `git-hooks.example.com`），不是只有 `DOMAIN`。子網域留空的話，整個網域都會指到通知服務。
+4. **其他應用程式設定** 不用改，按 **新增路由**。Cloudflare 會自動建立 DNS 紀錄。
+
+**路徑一定要填。** 填了之後只有 webhook 路徑對外，其他路徑（例如 `/health`）都不會公開。
+
+**服務 URL 要用 `http://`。** 通知服務在本機只提供 HTTP，對外的 HTTPS 由 Cloudflare 處理。填成 `https://` 會連不上，出現 `502`。
 
 ### A-3. 在伺服器上執行 cloudflared
 
@@ -187,8 +192,8 @@ curl -i -X POST https://HOSTNAME/webhooks/github
 | 你看到的 | 意思 |
 |---|---|
 | `403 forbidden` | 正確 |
-| `502` / `503` / Cloudflare 錯誤頁 | Tunnel 連不到服務：確認通知服務在執行，且 Service URL 是 `localhost:33444` |
-| `404` | Path 設定錯誤，或網址少了 `/webhooks/github` |
+| `502` / `503` / Cloudflare 錯誤頁 | Tunnel 連不到服務：確認通知服務在執行，且服務 URL 是 `http://localhost:33444`（不是 `https://`） |
+| `404` | 路徑設定錯誤，或網址少了 `/webhooks/github` |
 | 連線逾時 / 找不到主機 | DNS 還沒生效（等幾分鐘），或 Tunnel 沒在執行 |
 
 **3. `/health` 不應該對外**：
@@ -197,7 +202,7 @@ curl -i -X POST https://HOSTNAME/webhooks/github
 curl -i https://HOSTNAME/health
 ```
 
-應該是 `404`。如果看到 `{"status":"UP"}`，表示 Path 沒設定，請回去補上 `webhooks/github`。
+應該是 `404`。如果看到 `{"status":"UP"}`，表示路徑沒設定，請回去補上 `^/webhooks/github$`。
 
 **4. 從 GitHub 測試**：建立好 GitHub App 後，到 App 設定 → **Advanced** → **Recent Deliveries**，對 `ping` 按 **Redeliver**，回應應為 **`202`**。
 
@@ -209,8 +214,11 @@ curl -i https://HOSTNAME/health
 **cloudflared 跑在另一台機器，或另一個 Docker 網路**
 不建議。服務只信任「從本機 33444 port 進來的連線」所帶的真實 IP。cloudflared 必須和通知服務在同一台主機，並連到 `localhost:33444`。
 
-**可以不要 Path，整個網域都轉過來嗎？**
-可以運作，但 `/health` 會對外公開。建議保留 Path。
+**可以不填路徑，整個網域都轉過來嗎？**
+可以運作，但 `/health` 會對外公開。建議保留路徑。
+
+**之前填的路徑是 `webhooks/github`（沒有 `^` 和 `$`）**
+可以繼續用，GitHub 的請求一樣會通過。差別是沒有錨定，例如 `/xxx/webhooks/github` 也會被轉到服務（服務會回 `404`），想更嚴格可以改成 `^/webhooks/github$`。
 
 **要換 Tunnel 或 token**
 - 方式 A 選項 1：更新 `deploy/tunnel/token` 後執行 `docker compose up -d --force-recreate`。
