@@ -18,6 +18,10 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "setup.sh needs root to set file ownership; re-running with sudo..."
   exec sudo -- bash "$SCRIPT" "$@"
 fi
+# hidden input turns terminal echo off; turn it back on even after Ctrl+C
+if [ -t 0 ]; then
+  trap 'stty echo' EXIT
+fi
 
 CONFIG=config/config.conf
 KEY=secrets/github-app.pem
@@ -69,13 +73,21 @@ expand_path() {
 mkdir -p data secrets
 
 # ---- 1. GitHub App ID -------------------------------------------------------
-bold "1/5  GitHub App ID  (GitHub App settings page -> About -> App ID)"
+bold "1/5  GitHub App ID"
+cat <<'EOF'
+  Where to get it: GitHub -> Settings -> Developer settings -> GitHub Apps -> your app -> Edit
+  -> General -> "About" -> "App ID" (a number, e.g. 1234567). Not the Client ID (Iv23...).
+EOF
 current=$(sed -n 's/^github\.appId=//p' "$CONFIG" | tr -d '[:space:]')
 while true; do
   read -rp "  App ID${current:+ [$current]}: " app_id
   app_id=${app_id:-$current}
   [[ $app_id =~ ^[0-9]+$ ]] && break
-  warn "The App ID is a number, for example 1234567."
+  if [[ $app_id == Iv* ]]; then
+    warn "That is the Client ID. Use the App ID shown just above it (numbers only)."
+  else
+    warn "The App ID is a number, for example 1234567."
+  fi
 done
 if grep -q '^github\.appId=' "$CONFIG"; then
   sed -i "s/^github\.appId=.*/github.appId=$app_id/" "$CONFIG"
@@ -85,29 +97,87 @@ fi
 ok "github.appId=$app_id"
 
 # ---- 2. GitHub App private key ---------------------------------------------
-bold "2/5  GitHub App private key  (the .pem file from 'Generate a private key')"
+# paste_pem [FIRST_LINE]: reads a pasted PEM (hidden) up to its END line into $KEY
+paste_pem() {
+  local line pem="${1:+$1$'\n'}" lines=0
+  [ -n "$pem" ] && lines=1
+  echo "  Paste the whole key now, from -----BEGIN ... to -----END ... (input is hidden)."
+  [ -t 0 ] && stty -echo
+  while IFS= read -r line; do
+    line=${line%$'\r'}
+    [ -z "$pem" ] && [ -z "$line" ] && continue
+    pem+="$line"$'\n'
+    lines=$((lines + 1))
+    printf '.' >&2
+    [[ $line == -----END*PRIVATE\ KEY----- ]] && break
+  done
+  [ -t 0 ] && stty echo
+  echo >&2
+  if [[ $pem != -----BEGIN*PRIVATE\ KEY-----* || $pem != *-----END*PRIVATE\ KEY-----* ]]; then
+    warn "That was not a complete private key ($lines lines received). It must start with -----BEGIN and end with -----END."
+    return 1
+  fi
+  write_secret "$KEY" "$pem"
+  ok "Saved $KEY ($lines lines)"
+}
+
+bold "2/5  GitHub App private key"
+cat <<'EOF'
+  Where to get it: GitHub -> Settings -> Developer settings -> GitHub Apps -> your app -> Edit
+  -> General -> "Private keys" (bottom of the page) -> "Generate a private key".
+  Your browser downloads a file named like:  my-app.2026-11-05.private-key.pem
+  The short code listed on that page (SHA256:...) is only a fingerprint, not the key.
+EOF
 if ! keep_existing "$KEY" "The private key"; then
   found=$(find "$USER_HOME" "$PWD" -maxdepth 2 -name '*.private-key.pem' -type f 2>/dev/null | head -n 1 || true)
+  server=$(hostname -I 2>/dev/null | awk '{print $1}')
+  echo
+  echo "  How do you want to provide it?"
+  echo "    1) Paste it: open the .pem file in a text editor (Notepad, TextEdit), copy everything"
+  echo "    2) Use a file on this server${found:+ (found: $found)}"
+  default=1
+  [ -n "$found" ] && default=2
   while true; do
-    read -rp "  Path to the .pem file${found:+ [$found]}: " pem
-    pem=$(expand_path "${pem:-$found}")
-    if [ ! -f "$pem" ]; then
-      warn "File not found: ${pem:-<empty>}. Copy the .pem to this server first (for example with scp)."
-    elif ! grep -q 'PRIVATE KEY-----' "$pem"; then
-      warn "$pem does not look like a private key (.pem)."
-    else
-      break
-    fi
+    read -rp "  Choose 1 or 2 [$default]: " choice
+    case ${choice:-$default} in
+      1) paste_pem && break ;;
+      2)
+        echo "  To copy it here, run on your own computer (adjust the file name):"
+        echo "      scp ~/Downloads/my-app.2026-11-05.private-key.pem ${SUDO_USER:-user}@${server:-this-server}:~/"
+        read -rp "  Path to the .pem file on this server${found:+ [$found]}: " pem
+        if [[ $pem == -----BEGIN* ]]; then
+          paste_pem "$pem" && break
+          continue
+        fi
+        pem=$(expand_path "${pem:-$found}")
+        if [ ! -f "$pem" ]; then
+          if [[ -n $pem && $pem != */* && $pem != *.pem ]]; then
+            warn "'$pem' is not a file path. Enter the path of the downloaded .pem file, e.g. ~/my-app.2026-11-05.private-key.pem"
+          else
+            warn "File not found: ${pem:-<empty>}. Copy it to this server first, or choose 1 to paste it."
+          fi
+        elif ! grep -q 'PRIVATE KEY-----' "$pem"; then
+          warn "$pem is not a private key file. Use the .pem downloaded from 'Generate a private key'."
+        else
+          install -m 400 "$pem" "$KEY"
+          ok "Copied to $KEY"
+          ask_yes "Delete the original $pem now that it has been copied?" N && rm -f -- "$pem" && ok "Deleted $pem"
+          break
+        fi
+        ;;
+      *) warn "Enter 1 or 2." ;;
+    esac
   done
-  install -m 400 "$pem" "$KEY"
-  ok "Copied to $KEY"
-  ask_yes "Delete the original $pem now that it has been copied?" N && rm -f -- "$pem" && ok "Deleted $pem"
 fi
 
 # ---- 3. Webhook secret -----------------------------------------------------
-bold "3/5  GitHub webhook secret  (GitHub App settings -> Webhook secret)"
+bold "3/5  GitHub webhook secret"
+cat <<'EOF'
+  The text you typed into "Webhook secret" when creating the GitHub App (GitHub only shows it
+  while you type it). If you do not remember it, leave this empty: a new one is generated and
+  you paste it into the GitHub App -> Edit -> General -> Webhook -> "Webhook secret".
+EOF
 if ! keep_existing "$HOOK" "The webhook secret"; then
-  echo "  Type the secret you set in the GitHub App, or leave it empty to generate a new one."
   while true; do
     secret=$(read_hidden "Webhook secret (hidden)")
     if [ -z "$secret" ]; then
@@ -131,7 +201,12 @@ if ! keep_existing "$HOOK" "The webhook secret"; then
 fi
 
 # ---- 4. Discord bot token --------------------------------------------------
-bold "4/5  Discord bot token  (Discord Developer Portal -> your app -> Bot -> Reset Token)"
+bold "4/5  Discord bot token"
+cat <<'EOF'
+  Where to get it: https://discord.com/developers/applications -> your application -> "Bot"
+  -> "Reset Token" -> "Copy". It looks like  MTIz...xyz.Gh1abc.AbCd...  (three parts with dots).
+  Not the Application ID or Public Key from "General Information".
+EOF
 if ! keep_existing "$TOKEN" "The Discord token"; then
   while true; do
     token=$(read_hidden "Bot token (hidden)")

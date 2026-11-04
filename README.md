@@ -63,7 +63,9 @@ https://git-hooks.example.com/webhooks/github
 - **Webhook secret**：自訂一串隨機字串，等一下要用。也可以先留空，步驟 4 的 `setup.sh` 會幫你產生一組，再貼回這裡。
 - **Repository permissions**（全部選 **Read-only**）：Metadata、Contents、Actions、Pull requests
 - **Subscribe to events**：Push、Pull request、Workflow run、Release
-- 建立後記下 **App ID**，並產生、下載 **Private key**（`.pem` 檔）。
+- 建立後在 App 設定頁（**General**）：
+  - 記下 **About** 區塊的 **App ID**（一串數字，例如 `1234567`）。不是下面那個 `Iv23...` 開頭的 Client ID。
+  - 捲到頁面最下方 **Private keys** → **Generate a private key**，瀏覽器會下載一個 `你的-app.日期.private-key.pem` 檔。之後要用的是**這個檔案的內容**；頁面上顯示的 `SHA256:...` 只是指紋，不是金鑰。
 - 到 App 頁面按 **Install App**，安裝到你的帳號或 Organization，只勾選需要通知的 Repository。
 
 ### 3. 建立 Discord Bot
@@ -76,12 +78,6 @@ https://git-hooks.example.com/webhooks/github
 - 用連結把 Bot 邀請到你的 Discord Server。
 
 ### 4. 在伺服器上執行設定精靈
-
-先把步驟 2 下載的 Private key（`.pem` 檔）傳到伺服器，例如在你的電腦上執行：
-
-```bash
-scp ~/Downloads/your-app.2026-01-01.private-key.pem user@your-server:~/
-```
 
 在伺服器上取得專案原始碼：
 
@@ -100,11 +96,11 @@ cd GitStatus/deploy && sudo ./setup.sh
 | 步驟 | 要輸入的內容 |
 |---|---|
 | 1. GitHub App ID | 步驟 2 記下的 App ID |
-| 2. Private key | `.pem` 檔的路徑。家目錄裡的 `*.private-key.pem` 會自動帶入，直接按 Enter 即可；複製後可選擇刪除原檔 |
+| 2. Private key | 二選一：<br>**1) 貼上（最簡單）**：用記事本 / 文字編輯器打開下載的 `.pem` 檔，全選複製，貼到終端機。<br>**2) 伺服器上的檔案**：先用 `scp` 把 `.pem` 傳到伺服器再輸入路徑；家目錄裡的 `*.private-key.pem` 會自動帶入 |
 | 3. Webhook secret | 步驟 2 自訂的字串（輸入兩次確認）。留空會產生一組新的，請貼回 GitHub App 設定 |
 | 4. Discord Bot Token | 步驟 3 複製的 Token |
 
-輸入 secret 與 Token 時畫面不會顯示，也不會留在指令歷史紀錄裡。
+每一步都會先顯示這個值在 GitHub / Discord 的哪裡取得。輸入或貼上 Private key、secret、Token 時畫面不會顯示，也不會留在指令歷史紀錄裡。
 
 接著精靈會自動設定好檔案擁有者與權限，並詢問是否啟動服務。選擇啟動後會建置 image（第一次需要幾分鐘），並等到服務正常運作才結束。看到 `OK  The service is running.` 就完成了。
 

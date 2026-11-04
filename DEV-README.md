@@ -204,7 +204,7 @@ GitHub → Cloudflare → 使用者的 cloudflared（主機上）→ 127.0.0.1:3
 使用者的設定精靈（需 root，非 root 時自動以 `sudo` 重新執行）：
 
 1. 把 App ID 寫入 `config/config.conf` 的 `github.appId`（範本預設為空）。
-2. 複製 `.pem` 到 `secrets/github-app.pem`；檢查內容含 `PRIVATE KEY-----`。
+2. Private key 兩種來源：貼上（`stty -echo` 讀到 `-----END ... PRIVATE KEY-----` 為止，檢查 BEGIN/END）或伺服器上的檔案（檢查含 `PRIVATE KEY-----`）。在路徑提示貼上 `-----BEGIN` 開頭的內容會自動改走貼上流程；輸入看起來不是路徑的字串（例如指紋）會提示正確來源。`trap ... EXIT` 確保 Ctrl+C 後終端機恢復顯示。
 3. Webhook secret 以 `read -s` 輸入兩次；留空時從 `/dev/urandom` 產生 32 bytes hex 並顯示一次。
 4. Discord token 以 `read -s` 輸入，檢查三段式格式（不符時可確認後仍使用）。
 5. `chown -R 10001:10001 data secrets`、目錄 700、secret 400、`config.conf` 644。
