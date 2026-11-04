@@ -97,77 +97,60 @@ fi
 ok "github.appId=$app_id"
 
 # ---- 2. GitHub App private key ---------------------------------------------
-# paste_pem [FIRST_LINE]: reads a pasted PEM (hidden) up to its END line into $KEY
-paste_pem() {
-  local line pem="${1:+$1$'\n'}" lines=0
-  [ -n "$pem" ] && lines=1
-  echo "  Paste the whole key now, from -----BEGIN ... to -----END ... (input is hidden)."
-  [ -t 0 ] && stty -echo
-  while IFS= read -r line; do
-    line=${line%$'\r'}
-    [ -z "$pem" ] && [ -z "$line" ] && continue
-    pem+="$line"$'\n'
-    lines=$((lines + 1))
-    printf '.' >&2
-    [[ $line == -----END*PRIVATE\ KEY----- ]] && break
-  done
-  [ -t 0 ] && stty echo
-  echo >&2
-  if [[ $pem != -----BEGIN*PRIVATE\ KEY-----* || $pem != *-----END*PRIVATE\ KEY-----* ]]; then
-    warn "That was not a complete private key ($lines lines received). It must start with -----BEGIN and end with -----END."
+# use_pem FILE: validates and copies FILE to $KEY
+use_pem() {
+  if [ ! -f "$1" ]; then
+    warn "File not found: $1"
     return 1
   fi
-  write_secret "$KEY" "$pem"
-  ok "Saved $KEY ($lines lines)"
+  if ! grep -q 'PRIVATE KEY-----' "$1"; then
+    warn "$1 is not a private key. Use the .pem downloaded with 'New key'."
+    return 1
+  fi
+  install -m 400 "$1" "$KEY"
+  ok "Copied to $KEY"
+  if ask_yes "Delete the original $1 now that it has been copied?" Y; then
+    rm -f -- "$1"
+    ok "Deleted $1"
+  fi
 }
 
-bold "2/5  GitHub App private key"
-cat <<'EOF'
+bold "2/5  GitHub App private key (.pem file)"
+server=$(hostname -I 2>/dev/null | awk '{print $1}')
+cat <<EOF
   Where to get it: GitHub -> Settings -> Developer settings -> GitHub Apps -> your app -> Edit
-  -> left sidebar "Credentials" -> "Key pairs" -> "New key".
-  (Older GitHub pages: General -> "Private keys" -> "Generate a private key".)
-  Your browser downloads a .pem file, e.g.  my-app.2026-11-05.private-key.pem
-  The short code listed for each key (SHA256:...) is only a fingerprint, not the key.
+  -> left sidebar "Credentials" -> "Key pairs" -> "New key". Your browser downloads a .pem file.
+  Put that file in this directory: $PWD
+  For example, run on your own computer:
+      scp ~/Downloads/<file>.pem ${SUDO_USER:-user}@${server:-this-server}:$PWD/
 EOF
 if ! keep_existing "$KEY" "The private key"; then
-  found=$(find "$USER_HOME" "$PWD" -maxdepth 2 -name '*.private-key.pem' -type f 2>/dev/null | head -n 1 || true)
-  server=$(hostname -I 2>/dev/null | awk '{print $1}')
-  echo
-  echo "  How do you want to provide it?"
-  echo "    1) Paste it: open the .pem file in a text editor (Notepad, TextEdit), copy everything"
-  echo "    2) Use a file on this server${found:+ (found: $found)}"
-  default=1
-  [ -n "$found" ] && default=2
   while true; do
-    read -rp "  Choose 1 or 2 [$default]: " choice
-    case ${choice:-$default} in
-      1) paste_pem && break ;;
-      2)
-        echo "  To copy it here, run on your own computer (adjust the file name):"
-        echo "      scp ~/Downloads/my-app.2026-11-05.private-key.pem ${SUDO_USER:-user}@${server:-this-server}:~/"
-        read -rp "  Path to the .pem file on this server${found:+ [$found]}: " pem
-        if [[ $pem == -----BEGIN* ]]; then
-          paste_pem "$pem" && break
-          continue
-        fi
-        pem=$(expand_path "${pem:-$found}")
-        if [ ! -f "$pem" ]; then
-          if [[ -n $pem && $pem != */* && $pem != *.pem ]]; then
-            warn "'$pem' is not a file path. Enter the path of the downloaded .pem file, e.g. ~/my-app.2026-11-05.private-key.pem"
-          else
-            warn "File not found: ${pem:-<empty>}. Copy it to this server first, or choose 1 to paste it."
-          fi
-        elif ! grep -q 'PRIVATE KEY-----' "$pem"; then
-          warn "$pem is not a private key file. Use the .pem downloaded from 'Generate a private key'."
-        else
-          install -m 400 "$pem" "$KEY"
-          ok "Copied to $KEY"
-          ask_yes "Delete the original $pem now that it has been copied?" N && rm -f -- "$pem" && ok "Deleted $pem"
-          break
-        fi
-        ;;
-      *) warn "Enter 1 or 2." ;;
-    esac
+    mapfile -t pems < <(find "$PWD" -maxdepth 1 -name '*.pem' -type f | sort)
+    echo
+    if [ ${#pems[@]} -eq 1 ]; then
+      echo "  Found: ${pems[0]}"
+      if ask_yes "Is this the correct .pem file you want to use?" Y; then
+        use_pem "${pems[0]}" && break
+      fi
+    elif [ ${#pems[@]} -gt 1 ]; then
+      echo "  Found ${#pems[@]} .pem files:"
+      for i in "${!pems[@]}"; do
+        printf '    %d) %s\n' $((i + 1)) "${pems[i]}"
+      done
+      read -rp "  Which one is the GitHub App private key? [1-${#pems[@]}]: " n
+      if [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le ${#pems[@]} ]; then
+        use_pem "${pems[n - 1]}" && break
+      else
+        warn "Not one of the numbers above."
+      fi
+    else
+      warn "No .pem file in $PWD yet."
+    fi
+    read -rp "  Press Enter to search again, or type the path of the .pem file: " pem
+    if [ -n "$pem" ]; then
+      use_pem "$(expand_path "$pem")" && break
+    fi
   done
 fi
 
