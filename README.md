@@ -158,6 +158,16 @@ docker compose exec bot java -jar /app/gitstatus.jar admin
 
 ## 常見問題
 
+**`curl http://127.0.0.1:33444/health` 連不到（`Could not connect`）**
+服務剛啟動需要 10–20 秒；稍等再試。仍然失敗時查看 log：
+
+```bash
+docker compose logs --tail=40 bot
+```
+
+- 看到 `APPLICATION FAILED TO START`：照下方 `Action:` 的說明處理。最常見的是 `/data ... is not writable`，代表 `data/` 目錄權限不對（例如還沒執行 `setup.sh` 就先啟動，Docker 自動建立的目錄屬於 root）。執行 `sudo ./setup.sh` 修正即可。
+- 看到 `Setup: ... is not configured` 或 `secret file is not readable`：設定或 secret 檔缺少、權限不對，執行 `sudo ./setup.sh`。
+
 **事件旁邊顯示 `unavailable / insufficient permission`**
 GitHub App 沒有這個事件需要的權限。回到 App 設定加上權限（Read-only），並在安裝頁面接受新的權限。
 

@@ -48,7 +48,8 @@ Admin TUI ──▶ ConfigStore.mutate (transaction + revision+1) ──▶ SQLi
 | `GitStatusApplication` | 解析 `run` / `admin`，設定 profile |
 | `DaemonConfig` | daemon 專用 bean：dispatcher、webhook service、Discord 連線、排程（狀態回報、delivery_log 清理） |
 | `config.AppSettings` | 系統設定；secret 欄位存的是檔案路徑，讀取時才開檔 |
-| `db.SchemaInitializer` | 套用 `schema.sql`、補欄位 migration、DB 檔案權限 0600 |
+| `db.SchemaInitializer` | 檢查資料目錄可寫入、套用 `schema.sql`、補欄位 migration、DB 檔案權限 0600 |
+| `config.StartupCheckException` | 管理者可自行修正的啟動問題（Description / Action），由 `StartupCheckFailureAnalyzer` 輸出 |
 | `db.ConfigStore` | 所有 SQL；設定寫入都經 `mutate` |
 | `model` | `EventType`、`Language`、`NormalizedEvent`、`Records` |
 | `provider` | `GitProvider`（API 端）、`WebhookAdapter`（webhook 端）介面 |
@@ -138,6 +139,8 @@ mvn -DskipTests package
 | `GitHubAppAuthTest` | PKCS#1 / PKCS#8 金鑰、JWT 可被公鑰驗證 |
 | `GitHubWebhookAdapterTest` | 簽章、各事件正規化、form-encoded payload |
 | `SchemaMigrationTest` | 舊資料庫補上 `language` 欄位 |
+| `DatabaseWritableCheckTest` | 資料目錄自動建立、無法建立或唯讀時回報 `StartupCheckException` |
+| `AppSettingsTest` | `setupProblems()` 列出缺少的設定與 secret，不含內容 |
 | `ClientIpResolverTest` | CIDR 比對（v4 / v6）、`/proc/net/route` gateway 解析、只信任 trusted proxy 的 header、不做 DNS 誤判 |
 | `WebhookPipelineTest` | 真實 SQLite 端到端：路由、多目的地、各自語言、去重、錯誤簽章、來源驗證（含 fail-closed 與沿用已存清單）、reload、停用 / 未訂閱 / 撤銷授權 |
 
@@ -162,6 +165,12 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 - 時間使用 JVM 時區；Docker 容器預設為 UTC，需要本地時間可在 compose 設定 `TZ` 環境變數。
 - Daemon 輸出到 console（`docker compose logs`）；Admin TUI 不輸出到 console，寫到 `${java.io.tmpdir}/gitstatus-admin.log`。
 - Log 內容規範見 AGENTS.md：只記 metadata，不記 payload 與 secret。
+
+### 啟動檢查
+
+- SQLite 開檔失敗時只會回報 `unable to open database file`。所以 `SchemaInitializer` 在連線前先檢查資料目錄（以及既有的 `bot.db`、`-wal`、`-shm`）是否可寫入。不可寫入時丟出 `StartupCheckException`，由 `StartupCheckFailureAnalyzer`（註冊於 `META-INF/spring.factories`）輸出 Spring Boot 的 `APPLICATION FAILED TO START` 報告：Description 寫路徑、擁有者 uid 與執行使用者，Action 指向 `sudo ./setup.sh`。
+- Admin 模式關閉了 console log，所以 `GitStatusApplication.runAdmin` 會把啟動失敗直接印到 stderr（`StartupCheckException` 印 Description / Action，其他錯誤印訊息與 log 檔路徑）。
+- Daemon 啟動完成後，`AppSettings.setupProblems()` 列出的問題（`github.appId` 未設定、secret 檔不存在 / 無法讀取 / 為空）會以 `Setup:` 開頭的 WARN 記錄，只寫設定名稱與路徑。這些問題不會阻止啟動。
 
 ## 部署架構
 

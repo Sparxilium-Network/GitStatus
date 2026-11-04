@@ -15,6 +15,7 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 
+import com.sparxilium.gitstatus.config.AppSettings;
 import com.sparxilium.gitstatus.db.ConfigStore;
 import com.sparxilium.gitstatus.notify.DiscordGateway;
 import com.sparxilium.gitstatus.notify.NotificationDispatcher;
@@ -32,13 +33,27 @@ public class DaemonConfig {
 
     private final ConfigStore store;
     private final DiscordGateway discord;
+    private final AppSettings settings;
     private final int retentionDays;
     private volatile String lastDiscordError;
 
-    public DaemonConfig(ConfigStore store, DiscordGateway discord, @Value("${deliveryLog.retentionDays}") int retentionDays) {
+    public DaemonConfig(ConfigStore store, DiscordGateway discord, AppSettings settings,
+                        @Value("${deliveryLog.retentionDays}") int retentionDays) {
         this.store = store;
         this.discord = discord;
+        this.settings = settings;
         this.retentionDays = retentionDays;
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void warnAboutSetupProblems() {
+        List<String> problems = settings.setupProblems();
+        for (String problem : problems) {
+            log.warn("Setup: {}", problem);
+        }
+        if (!problems.isEmpty()) {
+            log.warn("Setup: run 'sudo ./setup.sh' in the deploy directory, then 'docker compose up -d --force-recreate'");
+        }
     }
 
     @Bean(destroyMethod = "shutdown")

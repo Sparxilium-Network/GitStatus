@@ -4,6 +4,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -60,6 +62,26 @@ public class AppSettings {
     public String readGithubPrivateKey() { return readSecret("github.privateKey", githubPrivateKeyPath); }
     public String readGithubWebhookSecret() { return readSecret("github.webhookSecret", githubWebhookSecretPath); }
     public String readDiscordToken() { return readSecret("discord.token", discordTokenPath); }
+
+    /** Missing settings and secret files that cannot be read; names and paths only, never content. */
+    public List<String> setupProblems() {
+        List<String> problems = new ArrayList<>();
+        if (githubAppId.isEmpty()) {
+            problems.add("github.appId is not configured");
+        }
+        checkSecret(problems, "github.privateKey", githubPrivateKeyPath);
+        checkSecret(problems, "github.webhookSecret", githubWebhookSecretPath);
+        checkSecret(problems, "discord.token", discordTokenPath);
+        return problems;
+    }
+
+    private static void checkSecret(List<String> problems, String setting, String path) {
+        try {
+            readSecret(setting, path);
+        } catch (IllegalStateException e) {
+            problems.add(e.getMessage());
+        }
+    }
 
     /** Reads a secret file. The error message names the setting and path, never the content. */
     static String readSecret(String setting, String path) {
