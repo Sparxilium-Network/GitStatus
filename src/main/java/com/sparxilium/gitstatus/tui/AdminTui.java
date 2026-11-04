@@ -23,6 +23,16 @@ import com.sparxilium.gitstatus.provider.GitProvider;
 @Profile(GitStatusApplication.PROFILE_ADMIN)
 public class AdminTui implements CommandLineRunner {
 
+    static final String RESTART_TEXT = """
+            Restart the notification service?
+
+            The service shuts down and Docker starts it again (restart: unless-stopped).
+            Webhooks that arrive during the restart (10-20 seconds) are lost unless you redeliver
+            them from the GitHub App's Recent Deliveries. This admin session closes as well.
+
+            Settings changed here apply within 5 seconds without a restart. A restart does not
+            pick up a new image or docker-compose.yml; use setup.sh for that.""";
+
     private final ConfigStore store;
     private final DiscordGateway discord;
     private final List<GitProvider> providers;
@@ -57,7 +67,7 @@ public class AdminTui implements CommandLineRunner {
 
     void mainMenu(Tui tui) {
         List<String> items = List.of("Discord Destinations", "Git Provider Sources", "Repositories / Notification Rules",
-                "System Status", "Exit");
+                "System Status", "Restart Service", "Exit");
         tui.show(new Tui.View() {
             String title() {
                 return "Git Notification Manager";
@@ -80,6 +90,18 @@ public class AdminTui implements CommandLineRunner {
                     case 1 -> new SourcesScreen(tui, store, providers).show();
                     case 2 -> new RepositoriesScreen(tui, store, providers).show();
                     case 3 -> new StatusScreen(tui, store, discord, providers, settings).show();
+                    case 4 -> {
+                        if (!tui.confirm("Restart Service", RESTART_TEXT)) {
+                            return true;
+                        }
+                        try {
+                            store.requestRestart();
+                            message = "Restart requested. The service stops within a few seconds and this session"
+                                    + " closes with it; open the admin TUI again after about 20 seconds.";
+                        } catch (RuntimeException e) {
+                            message = "Could not request a restart: " + Tui.message(e);
+                        }
+                    }
                     default -> {
                         return false;
                     }

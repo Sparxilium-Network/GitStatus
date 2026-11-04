@@ -127,11 +127,20 @@ Destination  : < Acme / #dev >  (1/3)
 | 區塊 | 看什麼 |
 |---|---|
 | `Database` | 設定的版本號；每次儲存都會加 1 |
-| `Daemon` | 服務目前套用的設定版本。和上面的版本相同，表示最新設定已生效；顯示 `No heartbeat yet` 表示服務沒在執行 |
+| `Daemon` | 服務目前套用的設定版本。和上面的版本相同，表示最新設定已生效；顯示 `No heartbeat yet` 表示服務沒在執行。`Started at` 是服務最後一次啟動的時間，可用來確認重啟是否完成 |
 | `Source verification` | 已載入幾個 GitHub webhook IP 範圍。顯示 `no GitHub hook ranges loaded` 時，所有 webhook 都會被拒絕 |
 | `Git Providers` | 每個 GitHub App 能不能登入 |
 | `Last webhook` | 最後一次收到的 webhook 和處理結果 |
 | `Destination send results` | 每個頻道最近一次送信的結果與錯誤 |
+
+## 5. Restart Service：重啟服務
+
+確認後服務會正常關閉，再由 Docker 自動啟動（`docker-compose.yml` 的 `restart: unless-stopped`），大約需要 10–20 秒。
+
+- 容器重啟時，**這個設定畫面也會一起關閉**，等一下再重新開啟即可。回到 **System Status** 看 `Started at` 是否更新。
+- 重啟期間 GitHub 送來的 webhook 會失敗，需要的話到 GitHub App 的 **Advanced → Recent Deliveries** 按 **Redeliver**。
+- 在這個畫面改的設定約 5 秒內就生效，**不需要重啟**。重啟適合用在 Discord 連線異常、改了 `secrets/` 裡的檔案之後。
+- 重啟**不會**套用新版程式、`docker-compose.yml` 或 `config/config.conf` 的變更，這些請執行 `sudo ./setup.sh`（或 `docker compose up -d --build --force-recreate`）。
 
 ## 沒收到通知時
 

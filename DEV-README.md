@@ -71,7 +71,7 @@ Admin TUI ──▶ ConfigStore.mutate (transaction + revision+1) ──▶ SQLi
 | `notification_rule` | Repo × Event × Destination |
 | `delivery_log` | 去重 + 有限 audit（只存 metadata，預設保留 30 天） |
 | `destination_health` | daemon 執行期：最近發送結果、`FAILED` 狀態 |
-| `runtime_status` | daemon 心跳、已載入 revision、Discord 狀態、reload 錯誤、GitHub hook IP 清單 |
+| `runtime_status` | daemon 心跳、已載入 revision、啟動時間、重啟要求、Discord 狀態、reload 錯誤、GitHub hook IP 清單 |
 
 Schema 以 `CREATE TABLE IF NOT EXISTS` 建立；之後新增的欄位在 `SchemaInitializer.migrate()` 以 `ALTER TABLE ... ADD COLUMN` 補上（冪等）。
 
@@ -81,6 +81,16 @@ Schema 以 `CREATE TABLE IF NOT EXISTS` 建立；之後新增的欄位在 `Schem
 2. `RuleSetHolder` 每 `reload.intervalMs`（預設 5 秒）讀 revision；有變化就由 `RuleSetLoader` 以單一 SELECT 載入路由，並在前後各讀一次 revision 確認是一致快照。
 3. 驗證（事件類型、Channel ID 格式）通過才 `AtomicReference.set`；失敗則保留舊規則並寫入 `runtime_status.daemon.reload_error`，同一個錯誤 revision 不會重試。
 4. 只有「完全啟用」的路由會進入 `RuleSet`：Installation `SELECTED`、Repo `accessible` 且已訂閱、規則啟用、目的地啟用。被標記 `FAILED` 的目的地由 dispatcher 略過，TUI 重設後（會 bump revision）重新載入。
+
+## 從 TUI 重啟
+
+admin TUI 是同一個容器裡另一個 JVM，碰不到 daemon，也不掛載 Docker socket，所以重啟透過資料庫進行：
+
+1. **Restart Service** 呼叫 `ConfigStore.requestRestart()`，把新的 UUID 寫進 `runtime_status.daemon.restart_request`。
+2. `RestartWatcher` 在啟動時記下當時的 token，之後每 `reload.intervalMs` 檢查一次。token 變了就在另一條執行緒呼叫 `SpringApplication.exit`（graceful shutdown）再 `System.exit(0)`，因為關閉 context 會等 scheduler 結束，不能在 scheduler 執行緒裡做。
+3. Docker 的 `restart: unless-stopped` 把容器拉起來。新的 process 啟動時看到的是同一個 token，所以不會一直重啟。`runtime_status.daemon.started_at` 記錄啟動時間，顯示在 System Status。
+
+這只是重啟 process，bind mount、映像檔、環境變數都不會更新，這些仍要靠 `docker compose up -d --force-recreate`。
 
 ## 通知語言
 

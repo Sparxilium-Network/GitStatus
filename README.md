@@ -156,6 +156,8 @@ docker compose exec bot java -jar /app/gitstatus.jar admin
 
 設定儲存後約 5 秒內自動生效，不需要重新啟動。設定完選 **Exit** 離開即可。
 
+需要重啟服務時（例如 Discord 連線異常），選單裡的 **Restart Service** 會讓服務重新啟動，設定畫面也會一起關閉，約 20 秒後再開即可。
+
 每個畫面的詳細說明、通知送出的條件，以及沒收到通知時怎麼排查，請看 [設定畫面使用說明](docs/ADMIN-TUI.md)。
 
 ### 修改頻道的通知語言

@@ -77,6 +77,8 @@ final class StatusScreen extends Tui.View {
         store.status("daemon.loaded_revision").ifPresentOrElse(
                 s -> sb.append("  Loaded revision ").append(s.value()).append(" (heartbeat ").append(s.updatedAt()).append(")\n"),
                 () -> sb.append("  No heartbeat yet (daemon not running?)\n"));
+        store.status(ConfigStore.STATUS_DAEMON_STARTED)
+                .ifPresent(s -> sb.append("  Started at ").append(s.value()).append('\n'));
         store.status("daemon.reload_error").filter(s -> s.value() != null)
                 .ifPresent(s -> sb.append("  Reload error: ").append(s.value()).append('\n'));
         store.status("daemon.discord").ifPresent(s -> sb.append("  Discord: ").append(s.value()).append('\n'));

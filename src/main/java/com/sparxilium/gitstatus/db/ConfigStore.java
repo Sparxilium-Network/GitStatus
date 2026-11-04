@@ -300,6 +300,19 @@ public class ConfigStore {
     public record StatusValue(String value, String updatedAt) {
     }
 
+    public static final String STATUS_RESTART_REQUEST = "daemon.restart_request";
+    public static final String STATUS_DAEMON_STARTED = "daemon.started_at";
+
+    /** Asks the running daemon to restart (it polls this key); see {@code RestartWatcher}. */
+    public void requestRestart() {
+        putStatus(STATUS_RESTART_REQUEST, java.util.UUID.randomUUID().toString());
+    }
+
+    /** The latest restart request token, or null when none was ever made. */
+    public String restartRequest() {
+        return status(STATUS_RESTART_REQUEST).map(StatusValue::value).orElse(null);
+    }
+
     public Optional<StatusValue> status(String key) {
         return jdbc.query("SELECT value, updated_at FROM runtime_status WHERE key = ?",
                 (rs, i) -> new StatusValue(rs.getString(1), rs.getString(2)), key).stream().findFirst();
