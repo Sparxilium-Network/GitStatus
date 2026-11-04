@@ -12,3 +12,4 @@ deploy/tunnel/*.json
 deploy/tunnel/config.yml
 deploy/*.pem
 .claude/
+deploy/config/config.conf

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Interactive setup for this deploy directory:
+#   config/config.conf (created from config.conf.example, upgraded to the current config.version)
 #   one or more GitHub Apps -> secrets/github-apps/<App ID>/private-key.pem and webhook-secret
 #   secrets/discord-token
 #   ownership and permissions for data/ and secrets/ (the container runs as uid 10001)
@@ -24,6 +25,9 @@ if [ -t 0 ]; then
 fi
 
 CONFIG=config/config.conf
+CONFIG_EXAMPLE=config/config.conf.example
+# config.conf format version this script writes; matches ConfigVersionCheck.CURRENT
+CONFIG_VERSION=1
 APPS=secrets/github-apps
 LEGACY_KEY=secrets/github-app.pem
 LEGACY_HOOK=secrets/github-webhook-secret
@@ -70,8 +74,36 @@ expand_path() {
   printf '%s' "$p"
 }
 
-[ -f "$CONFIG" ] || fail "$CONFIG not found. Run this script from the deploy directory of the project."
+[ -f "$CONFIG_EXAMPLE" ] || fail "$CONFIG_EXAMPLE not found. Run this script from the deploy directory of the project."
 mkdir -p data "$APPS"
+
+# ---- config.conf: create it, or upgrade it to CONFIG_VERSION ----------------
+# A release that adds or renames settings raises CONFIG_VERSION (and ConfigVersionCheck.CURRENT in
+# the Java code) and adds a step below that edits existing files in place.
+if [ ! -f "$CONFIG" ]; then
+  install -m 644 "$CONFIG_EXAMPLE" "$CONFIG"
+  ok "Created $CONFIG from $CONFIG_EXAMPLE"
+fi
+config_version=$(sed -n 's/^config\.version=//p' "$CONFIG" | tr -d '[:space:]')
+if [ -z "$config_version" ]; then
+  # files from before versioning are version 1 apart from the missing line
+  sed -i '1i # Format version of this file. setup.sh upgrades older files to the current version when a\n# release adds or renames settings; do not change it by hand.\nconfig.version=1\n' "$CONFIG"
+  config_version=1
+  ok "Added config.version=1 to $CONFIG"
+fi
+[[ $config_version =~ ^[0-9]+$ ]] || fail "config.version in $CONFIG is '$config_version', not a number."
+if [ "$config_version" -gt "$CONFIG_VERSION" ]; then
+  fail "$CONFIG is version $config_version, newer than this setup.sh understands ($CONFIG_VERSION). Run git pull first."
+fi
+while [ "$config_version" -lt "$CONFIG_VERSION" ]; do
+  case $config_version in
+    # 1) ... edit settings for version 2 ... ;;
+    *) fail "No upgrade step from config.version=$config_version." ;;
+  esac
+  config_version=$((config_version + 1))
+  sed -i "s/^config\.version=.*/config.version=$config_version/" "$CONFIG"
+  ok "Upgraded $CONFIG to version $config_version"
+done
 
 # ---- GitHub App helpers -----------------------------------------------------
 # read_app_id [DEFAULT]: sets APP_ID

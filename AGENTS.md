@@ -67,6 +67,7 @@ mvn -DskipTests package
 - 新增事件：在 `EventType` 加入列舉值 → 在 provider adapter 中正規化 → 在 `GitHubProvider.capabilities` 對應所需權限 → 在 `MessageFormatter` 加入格式 → 補測試。
 - 新增 provider（例如 GitLab）：實作 `GitProvider` 與 `WebhookAdapter` 並註冊為 Spring bean，不要改動路由與發送層。
 - GitHub App 只申請 Read 權限。
+- **設定格式有版本號**：`config.conf` 的 `config.version`（`ConfigVersionCheck.CURRENT` / `setup.sh` 的 `CONFIG_VERSION`）與資料庫的 `PRAGMA user_version`（`SchemaInitializer.SCHEMA_VERSION`）。新增或更名設定、變更 schema 時要加版本號並寫升級步驟（作法見 DEV-README.md「版本」）。`deploy/config/config.conf` 不受 git 管理，範本是 `config.conf.example`。
 - 支援多個 GitHub App（每個 Organization 一個私人 App）：安裝一律記錄所屬 `app_id`，API 呼叫用該 App 的憑證，webhook 只能路由到簽章 App 自己的安裝。不要假設只有一個 App。
 
 ## 程式風格

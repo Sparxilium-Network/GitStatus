@@ -2,6 +2,8 @@ package com.sparxilium.gitstatus.db;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 
@@ -13,6 +15,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.sparxilium.gitstatus.config.AppSettings;
+import com.sparxilium.gitstatus.config.StartupCheckException;
 import com.sparxilium.gitstatus.model.Language;
 import com.sparxilium.gitstatus.model.Records.InstallationStatus;
 
@@ -60,5 +63,31 @@ class SchemaMigrationTest {
         store.assignInstallationsWithoutApp("github", "1234567");
         assertEquals("1234567", store.installations("github").get(0).appId());
         assertEquals(InstallationStatus.SELECTED, store.installations("github").get(0).status());
+        assertEquals(SchemaInitializer.SCHEMA_VERSION, jdbc.queryForObject("PRAGMA user_version", Integer.class));
+    }
+
+    @Test
+    void newDatabaseGetsTheCurrentSchemaVersion() throws Exception {
+        String db = tmp.resolve("new.db").toString();
+        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite:" + db));
+        new SchemaInitializer(jdbc, settings(db)).afterPropertiesSet();
+        assertEquals(SchemaInitializer.SCHEMA_VERSION, jdbc.queryForObject("PRAGMA user_version", Integer.class));
+    }
+
+    @Test
+    void databaseFromANewerReleaseRefusesToStart() {
+        String db = tmp.resolve("newer.db").toString();
+        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite:" + db));
+        jdbc.execute("PRAGMA user_version = " + (SchemaInitializer.SCHEMA_VERSION + 1));
+        StartupCheckException e = assertThrows(StartupCheckException.class,
+                () -> new SchemaInitializer(jdbc, settings(db)).afterPropertiesSet());
+        assertTrue(e.getMessage().contains("schema version " + (SchemaInitializer.SCHEMA_VERSION + 1)));
+        // nothing was created or changed
+        assertEquals(SchemaInitializer.SCHEMA_VERSION + 1, jdbc.queryForObject("PRAGMA user_version", Integer.class));
+        assertTrue(jdbc.queryForList("SELECT name FROM sqlite_master", String.class).isEmpty());
+    }
+
+    private static AppSettings settings(String db) {
+        return new AppSettings(db, "https://api.github.com", "", "", "", "", "", 5000, 1000, 33444);
     }
 }

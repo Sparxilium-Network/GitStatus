@@ -4,7 +4,7 @@
 #
 # Layout (this directory):
 #   docker-compose.yml
-#   config/config.conf
+#   config/config.conf          created by setup.sh from config.conf.example (not tracked by git)
 #   data/                       writable, owned by uid 10001
 #   secrets/                    owned by uid 10001, chmod 400 files
 #     github-apps/              one directory per GitHub App (one App per organization)

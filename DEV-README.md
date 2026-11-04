@@ -217,14 +217,15 @@ GitHub → Cloudflare → 使用者的 cloudflared（主機上）→ 127.0.0.1:3
 
 使用者的設定精靈（需 root，非 root 時自動以 `sudo` 重新執行）：
 
-0. 升級：若有舊版的 `secrets/github-app.pem` / `secrets/github-webhook-secret`，搬到 `secrets/github-apps/<App ID>/`（App ID 取自 `config.conf` 的 `github.appId`，沒有就詢問）。
-1. GitHub Apps：沒有任何 App 時直接新增一個；已有 App 時列出狀態，可選擇更換其中一個的 key / secret。之後重複詢問 `Add another GitHub App?`。每個 App：
+0. `config/config.conf`：不存在時從 `config.conf.example` 建立；沒有 `config.version` 時在開頭補上 `config.version=1`；版本比腳本的 `CONFIG_VERSION` 新時中止；較舊時依序執行 `upgrade` 步驟（`case $config_version in N) ...`）並更新版本號。
+1. 升級：若有舊版的 `secrets/github-app.pem` / `secrets/github-webhook-secret`，搬到 `secrets/github-apps/<App ID>/`（App ID 取自 `config.conf` 的 `github.appId`，沒有就詢問）。
+2. GitHub Apps：沒有任何 App 時直接新增一個；已有 App 時列出狀態，可選擇更換其中一個的 key / secret。之後重複詢問 `Add another GitHub App?`。每個 App：
    - App ID 必須是數字（輸入 `Iv...` 時提示那是 Client ID）。
    - Private key 只接受檔案：搜尋 `deploy/` 目錄（不含子目錄）的 `*.pem`。一個時請使用者確認，多個時選編號，沒有時可重新搜尋或輸入路徑。檢查內容含 `PRIVATE KEY-----` 後以 `install -m 400` 複製到 `secrets/github-apps/<App ID>/private-key.pem`，預設刪除原檔。`deploy/*.pem` 已列入 `.gitignore`。
    - Webhook secret 以 `read -s` 輸入兩次；留空時從 `/dev/urandom` 產生 32 bytes hex 並顯示一次。
-2. Discord token 以 `read -s` 輸入，檢查三段式格式（不符時可確認後仍使用）。
-3. `chown -R 10001:10001 data secrets`、`data` 與 `secrets` 底下所有目錄 700、所有檔案 400、`config.conf` 644，並列出各 App 的狀態。
-4. 選擇啟動時執行 `docker compose up -d --build --force-recreate`（bind mount 的檔案變更需要重建容器），最多等 90 秒 `/health`；失敗時印出最近 40 行 log。
+3. Discord token 以 `read -s` 輸入，檢查三段式格式（不符時可確認後仍使用）。
+4. `chown -R 10001:10001 data secrets`、`data` 與 `secrets` 底下所有目錄 700、所有檔案 400、`config.conf` 644，並列出各 App 的狀態。
+5. 選擇啟動時執行 `docker compose up -d --build --force-recreate`（bind mount 的檔案變更需要重建容器），最多等 90 秒 `/health`；失敗時印出最近 40 行 log。
 
 Secret 以 `printf '%s'` 寫入（無換行、`umask 077`），不出現在指令列參數或 shell history。重複執行時已存在的檔案預設保留，所以也可以當作「修正權限」使用。
 
@@ -232,8 +233,11 @@ Secret 以 `printf '%s'` 寫入（無換行、`umask 077`），不出現在指�
 
 ## 設定檔（`config.conf`）
 
+`deploy/config/config.conf` 不受 git 管理（`.gitignore`），由 `setup.sh` 從受管理的 `deploy/config/config.conf.example` 建立，所以使用者的修改不會讓 `git pull` 衝突。
+
 | Key | 預設 | 說明 |
 |---|---|---|
+| `config.version` | | 檔案格式版本（目前 `1`）。見下方「版本」 |
 | `server.port` | `33444` | 容器內監聽的 port；Dockerfile 的 EXPOSE 與 HEALTHCHECK 也使用 33444 |
 | `database` | `/data/bot.db` | |
 | `github.appsDir` | `/run/secrets/github-apps` | 每個 GitHub App 一個子目錄（見「多個 GitHub App」） |
@@ -249,6 +253,23 @@ Secret 以 `printf '%s'` 寫入（無換行、`umask 077`），不出現在指�
 | `webhook.clientIpHeader` | `CF-Connecting-IP` | 真實 IP header |
 | `webhook.trustedProxies` | `gateway` | 可信任的代理：`gateway`（容器預設 gateway）、主機名稱或 CIDR，逗號分隔 |
 | `deliveryLog.retentionDays` | `30` | |
+
+## 版本
+
+設定有兩個版本號，都只在格式改變時增加：
+
+| 對象 | 存放位置 | 程式中的版本 | 升級者 |
+|---|---|---|---|
+| `config.conf` | `config.version=N` | `ConfigVersionCheck.CURRENT`、`setup.sh` 的 `CONFIG_VERSION` | `setup.sh` 的升級迴圈 |
+| SQLite schema | `PRAGMA user_version` | `SchemaInitializer.SCHEMA_VERSION` | `SchemaInitializer.migrate` 啟動時自動執行 |
+
+- 版本比程式支援的新：丟出 `StartupCheckException`，拒絕啟動（避免舊版用看不懂的設定或 schema 執行）。
+- `config.version` 缺少：視為版本 1 之前的檔案，照常啟動並記 `Setup:` WARN，提醒執行 `setup.sh`。新增的設定在 `application.properties` 一律要有預設值，舊檔案才能繼續使用。
+- 資料庫 `user_version` 為 0（版本化之前建立）：套用 `from < 1` 的補欄位步驟後設為 1。
+
+**新增或更名 config 設定**：`config.conf.example` 與 `application.properties`（預設值）加入設定 → `ConfigVersionCheck.CURRENT` 與 `setup.sh` 的 `CONFIG_VERSION` 加 1 → 在 `setup.sh` 的 `case` 加入從舊版本升級的步驟（就地修改使用者的檔案）→ 更新上方表格。
+
+**變更 schema**：`schema.sql`（新資料庫）→ `SCHEMA_VERSION` 加 1 → `migrate` 加入 `if (from < N)` 步驟（既有資料庫）→ 在 `SchemaMigrationTest` 補測試。
 
 ## 擴充
 

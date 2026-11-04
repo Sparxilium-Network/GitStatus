@@ -207,10 +207,22 @@ Webhook secret 不一致。確認 `secrets/github-apps/<App ID>/webhook-secret` 
 
 ## 更新版本
 
-在 `deploy/` 目錄取得新版原始碼後重新建置並啟動：
+在 `deploy/` 目錄取得新版原始碼，執行設定精靈（會把 `config/config.conf` 升級到新版格式，要保留的項目直接按 Enter），再重新建置並啟動：
 
 ```bash
-git pull && docker compose up -d --build
+git pull && sudo ./setup.sh
 ```
 
-更新時資料庫會自動升級，既有設定都會保留。
+精靈最後選擇啟動即可；不想跑精靈時也可以直接 `docker compose up -d --build`，舊格式的設定檔仍可使用，只是 log 會提醒你執行 `setup.sh`。資料庫會自動升級，既有設定都會保留。
+
+`config/config.conf` 與資料庫都有版本號。如果它們是由更新的版本寫入的（例如更新後又退回舊版），服務會拒絕啟動並說明原因，不會用看不懂的設定繼續執行。
+
+**從 2026-11 以前的版本更新（只需要做一次）**：舊版的 `config/config.conf` 由 git 管理，設定精靈寫入後會讓 `git pull` 失敗（`Your local changes ... would be overwritten`）。新版改由 `config.conf.example` 範本產生，你的設定檔不再受 git 管理。請先備份再更新：
+
+```bash
+cp config/config.conf ~/config.conf.bak && git checkout -- config/config.conf
+```
+
+```bash
+git pull && cp ~/config.conf.bak config/config.conf && sudo ./setup.sh
+```

@@ -36,6 +36,15 @@ public class SchemaInitializer implements InitializingBean {
         Path db = Path.of(settings.database()).toAbsolutePath();
         checkWritable(db);
 
+        int version = jdbc.queryForObject("PRAGMA user_version", Integer.class);
+        if (version > SCHEMA_VERSION) {
+            throw new StartupCheckException("The database " + db + " is schema version " + version
+                    + ", but this release only understands versions up to " + SCHEMA_VERSION
+                    + ". It was upgraded by a newer gitstatus.",
+                    "Run the newer release again (git pull && docker compose up -d --build), or restore a copy of "
+                            + "the database made before that upgrade.");
+        }
+
         String script;
         try (InputStream in = getClass().getResourceAsStream("/schema.sql")) {
             script = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -45,7 +54,7 @@ public class SchemaInitializer implements InitializingBean {
                 jdbc.execute(sql);
             }
         }
-        migrate();
+        migrate(version);
         restrictPermissions(db);
     }
 
@@ -86,10 +95,26 @@ public class SchemaInitializer implements InitializingBean {
                         + "sudo chmod 700 data'), then 'docker compose up -d'.");
     }
 
-    /** Columns added after v1; CREATE TABLE IF NOT EXISTS does not add them to existing databases. */
-    private void migrate() {
-        addColumnIfMissing("discord_destination", "language", "TEXT NOT NULL DEFAULT 'en'");
-        addColumnIfMissing("provider_installation", "app_id", "TEXT");
+    /**
+     * Schema version, stored in SQLite's {@code PRAGMA user_version}. A database written by a newer
+     * release refuses to start instead of being used with a schema this release does not know.
+     * <p>
+     * To change the schema: update schema.sql (new databases), raise this number and add an
+     * {@code if (from < N)} step to {@link #migrate} (existing databases).
+     */
+    public static final int SCHEMA_VERSION = 1;
+
+    /** Upgrades an existing database; CREATE TABLE IF NOT EXISTS does not add new columns to it. */
+    private void migrate(int from) {
+        if (from < 1) {
+            // databases from before schema versioning: columns added after the first release
+            addColumnIfMissing("discord_destination", "language", "TEXT NOT NULL DEFAULT 'en'");
+            addColumnIfMissing("provider_installation", "app_id", "TEXT");
+        }
+        if (from < SCHEMA_VERSION) {
+            jdbc.execute("PRAGMA user_version = " + SCHEMA_VERSION);
+            log.info("Database schema version {} -> {}", from, SCHEMA_VERSION);
+        }
     }
 
     private void addColumnIfMissing(String table, String column, String definition) {
