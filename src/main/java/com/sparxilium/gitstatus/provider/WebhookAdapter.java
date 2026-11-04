@@ -12,10 +12,14 @@ public interface WebhookAdapter {
     String provider();
 
     /**
+     * Checks the delivery signature against the configured credentials.
+     *
      * @param headers request headers with lower-case names
-     * @return true only if the signature / secret matches
+     * @return the id of the credential whose secret signed the delivery (for GitHub: the App ID),
+     *         or null if no configured secret matches
+     * @throws IllegalStateException if a secret that has to be checked cannot be read
      */
-    boolean verify(Map<String, String> headers, byte[] body);
+    String authenticate(Map<String, String> headers, byte[] body);
 
     /** Provider delivery id used for de-duplication, or null if absent. */
     String deliveryId(Map<String, String> headers);

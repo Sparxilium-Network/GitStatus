@@ -19,12 +19,12 @@ import com.sparxilium.gitstatus.routing.RuleSet.RepoKey;
 public class RuleSetLoader {
 
     private static final String ROUTES_SQL = """
-            SELECT pi.provider, pi.external_id, r.external_repo_id, nr.event_type,
+            SELECT pi.provider, pi.app_id, pi.external_id, r.external_repo_id, nr.event_type,
                    d.id, d.name, d.guild_id, d.channel_id, d.bot_profile, d.language
             FROM notification_rule nr
             JOIN repository r             ON r.id = nr.repository_id AND r.accessible = 1
             JOIN subscription s           ON s.repository_id = r.id AND s.enabled = 1
-            JOIN provider_installation pi ON pi.id = r.installation_id AND pi.status = 'SELECTED'
+            JOIN provider_installation pi ON pi.id = r.installation_id AND pi.status = 'SELECTED' AND pi.app_id IS NOT NULL
             JOIN discord_destination d    ON d.id = nr.destination_id AND d.enabled = 1
             WHERE nr.enabled = 1
             ORDER BY d.name
@@ -44,7 +44,7 @@ public class RuleSetLoader {
         }
     }
 
-    private record Row(String provider, String installationId, String repoId, String eventType, DiscordDestination dest) {
+    private record Row(String provider, String appId, String installationId, String repoId, String eventType, DiscordDestination dest) {
     }
 
     /**
@@ -55,8 +55,8 @@ public class RuleSetLoader {
         for (int attempt = 0; attempt < 5; attempt++) {
             long before = store.revision();
             List<Row> rows = jdbc.query(ROUTES_SQL, (rs, i) -> new Row(rs.getString(1), rs.getString(2), rs.getString(3),
-                    rs.getString(4), new DiscordDestination(rs.getLong(5), rs.getString(6), rs.getString(7), rs.getString(8),
-                            rs.getString(9), true, Language.fromCode(rs.getString(10)))));
+                    rs.getString(4), rs.getString(5), new DiscordDestination(rs.getLong(6), rs.getString(7), rs.getString(8),
+                            rs.getString(9), rs.getString(10), true, Language.fromCode(rs.getString(11)))));
             long after = store.revision();
             if (before == after) {
                 return build(after, rows);
@@ -78,7 +78,7 @@ public class RuleSetLoader {
             if (!row.dest().channelId().matches("\\d{15,25}")) {
                 throw new InvalidConfigurationException("destination " + row.dest().id() + " has an invalid channel id");
             }
-            routes.computeIfAbsent(new RepoKey(row.provider(), row.installationId(), row.repoId()), k -> new HashMap<>())
+            routes.computeIfAbsent(new RepoKey(row.provider(), row.appId(), row.installationId(), row.repoId()), k -> new HashMap<>())
                     .computeIfAbsent(type, k -> new ArrayList<>())
                     .add(row.dest());
         }

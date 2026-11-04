@@ -13,7 +13,7 @@
 | Discord | JDA 6：只發送，無指令、無訊息監聽、無 privileged intent |
 | TUI | Lanterna 3（只用於鍵盤輸入與游標控制，畫面為自繪純文字） |
 | 資料庫 | SQLite（WAL、`busy_timeout=5000`、`transaction_mode=IMMEDIATE`）+ `JdbcTemplate`，不用 ORM |
-| GitHub 認證 | GitHub App：RS256 JWT（自行簽章，支援 PKCS#1 / PKCS#8）→ Installation token（僅存於記憶體） |
+| GitHub 認證 | 一或多個 GitHub App：RS256 JWT（自行簽章，支援 PKCS#1 / PKCS#8）→ Installation token（僅存於記憶體） |
 
 ## 執行模式
 
@@ -53,7 +53,7 @@ Admin TUI ──▶ ConfigStore.mutate (transaction + revision+1) ──▶ SQLi
 | `db.ConfigStore` | 所有 SQL；設定寫入都經 `mutate` |
 | `model` | `EventType`、`Language`、`NormalizedEvent`、`Records` |
 | `provider` | `GitProvider`（API 端）、`WebhookAdapter`（webhook 端）介面 |
-| `provider.github` | `GitHubAppAuth`（JWT）、`GitHubProvider`、`GitHubWebhookAdapter` |
+| `provider.github` | `GitHubApps`（探索已設定的 App）、`GitHubAppAuth`（JWT）、`GitHubProvider`、`GitHubWebhookAdapter`、`GitHubAppUpgrade`（舊安裝補上 App） |
 | `routing` | `RuleSet`（不可變快照）、`RuleSetLoader`（載入 + 驗證）、`RuleSetHolder`（輪詢 + 原子替換） |
 | `notify` | `Sanitizer`、`MessageFormatter`、`DiscordGateway`、`NotificationDispatcher` |
 | `webhook` | `WebhookController`（HTTP）、`WebhookService`（流程） |
@@ -173,7 +173,18 @@ TUI 畫面是逐行從左上角輸出的純文字（`=====` 分隔線、`>` 游�
 
 - SQLite 開檔失敗時只會回報 `unable to open database file`。所以 `SchemaInitializer` 在連線前先檢查資料目錄（以及既有的 `bot.db`、`-wal`、`-shm`）是否可寫入。不可寫入時丟出 `StartupCheckException`，由 `StartupCheckFailureAnalyzer`（註冊於 `META-INF/spring.factories`）輸出 Spring Boot 的 `APPLICATION FAILED TO START` 報告：Description 寫路徑、擁有者 uid 與執行使用者，Action 指向 `sudo ./setup.sh`。
 - Admin 模式關閉了 console log，所以 `GitStatusApplication.runAdmin` 會把啟動失敗直接印到 stderr（`StartupCheckException` 印 Description / Action，其他錯誤印訊息與 log 檔路徑）。
-- Daemon 啟動完成後，`AppSettings.setupProblems()` 列出的問題（`github.appId` 未設定、secret 檔不存在 / 無法讀取 / 為空）會以 `Setup:` 開頭的 WARN 記錄，只寫設定名稱與路徑。這些問題不會阻止啟動。
+- Daemon 啟動完成後，`GitHubApps.setupProblems()` 與 `AppSettings.setupProblems()` 列出的問題（沒有任何 App、App 目錄名稱不是數字、secret 檔不存在 / 無法讀取 / 為空）會以 `Setup:` 開頭的 WARN 記錄，只寫設定名稱與路徑。這些問題不會阻止啟動。
+
+## 多個 GitHub App
+
+私人 GitHub App 只能安裝在擁有它的帳號上，所以要涵蓋多個 Organization 就需要每個 Organization 一個 App。
+
+- **設定位置**：`github.appsDir`（預設 `/run/secrets/github-apps`）底下每個 App 一個子目錄，目錄名稱就是 App ID，內含 `private-key.pem` 與 `webhook-secret`。`GitHubApps` 每次呼叫時重新掃描目錄，所以新增 App 不需要重啟。舊版的 `github.appId` / `github.privateKey` / `github.webhookSecret` 在 `github.appId` 有值時仍算一個 App；同 ID 的目錄優先。
+- **資料**：`provider_installation.app_id` 記錄安裝屬於哪個 App。`ConfigStore.syncInstallations(provider, appId, …)` 只會把**同一個 App** 不再回傳的安裝標成 `REVOKED`，同步某個 App 不會影響其他 App。Installation token 用安裝所屬 App 的私鑰換取；私鑰檔修改時間變了就重新載入（換 key 不必重啟）。
+- **升級**：舊資料庫的安裝 `app_id` 為 NULL。`GitHubAppUpgrade` 在啟動時若只設定一個 App，就把它們全部歸給該 App；有多個 App 時記 WARN，等 TUI 的 **Git Provider Sources** 重新同步時補上。`app_id` 為 NULL 的安裝不會產生任何路由。
+- **Webhook 驗證**：所有 App 共用 `/webhooks/github`。GitHub 對 App webhook 會帶 `X-GitHub-Hook-Installation-Target-Type: integration` 與 `X-GitHub-Hook-Installation-Target-ID: <App ID>`。這個 header 沒有簽章，只用來挑選要比對哪個 App 的 secret，HMAC 必須和那個 App 的 secret 相符；ID 不在設定中就拒絕（401）。沒有這個 header 時逐一嘗試每個 App 的 secret，必須剛好一個相符（多個 App 共用同一個 secret 時無法判斷，拒絕）。
+- **路由**：`RuleSet.RepoKey` 包含 `appId`。`WebhookAdapter.authenticate` 回傳簽章所屬的 App ID，路由時只會比對屬於該 App 的安裝；用 App A 的 secret 簽的 delivery 即使 payload 寫的是 App B 的 installation id，也不會送出（`NO_ROUTE`）。
+- **TUI**：Sources 每個 App 各同步一次並顯示各自的結果；Status 逐一檢查每個 App 的認證；同一個 Repository 透過兩個以上的安裝可見時，在 Repository 清單以 `*` 標示（兩邊都啟用會重複通知）。
 
 ## 部署架構
 
@@ -206,12 +217,14 @@ GitHub → Cloudflare → 使用者的 cloudflared（主機上）→ 127.0.0.1:3
 
 使用者的設定精靈（需 root，非 root 時自動以 `sudo` 重新執行）：
 
-1. 把 App ID 寫入 `config/config.conf` 的 `github.appId`（範本預設為空）。
-2. Private key 只接受檔案：搜尋 `deploy/` 目錄（不含子目錄）的 `*.pem`。一個時請使用者確認，多個時選編號，沒有時可重新搜尋或輸入路徑。檢查內容含 `PRIVATE KEY-----` 後以 `install -m 400` 複製到 `secrets/github-app.pem`，預設刪除原檔。`deploy/*.pem` 已列入 `.gitignore`。
-3. Webhook secret 以 `read -s` 輸入兩次；留空時從 `/dev/urandom` 產生 32 bytes hex 並顯示一次。
-4. Discord token 以 `read -s` 輸入，檢查三段式格式（不符時可確認後仍使用）。
-5. `chown -R 10001:10001 data secrets`、目錄 700、secret 400、`config.conf` 644。
-6. 選擇啟動時執行 `docker compose up -d --build --force-recreate`（bind mount 的檔案變更需要重建容器），最多等 90 秒 `/health`；失敗時印出最近 40 行 log。
+0. 升級：若有舊版的 `secrets/github-app.pem` / `secrets/github-webhook-secret`，搬到 `secrets/github-apps/<App ID>/`（App ID 取自 `config.conf` 的 `github.appId`，沒有就詢問）。
+1. GitHub Apps：沒有任何 App 時直接新增一個；已有 App 時列出狀態，可選擇更換其中一個的 key / secret。之後重複詢問 `Add another GitHub App?`。每個 App：
+   - App ID 必須是數字（輸入 `Iv...` 時提示那是 Client ID）。
+   - Private key 只接受檔案：搜尋 `deploy/` 目錄（不含子目錄）的 `*.pem`。一個時請使用者確認，多個時選編號，沒有時可重新搜尋或輸入路徑。檢查內容含 `PRIVATE KEY-----` 後以 `install -m 400` 複製到 `secrets/github-apps/<App ID>/private-key.pem`，預設刪除原檔。`deploy/*.pem` 已列入 `.gitignore`。
+   - Webhook secret 以 `read -s` 輸入兩次；留空時從 `/dev/urandom` 產生 32 bytes hex 並顯示一次。
+2. Discord token 以 `read -s` 輸入，檢查三段式格式（不符時可確認後仍使用）。
+3. `chown -R 10001:10001 data secrets`、`data` 與 `secrets` 底下所有目錄 700、所有檔案 400、`config.conf` 644，並列出各 App 的狀態。
+4. 選擇啟動時執行 `docker compose up -d --build --force-recreate`（bind mount 的檔案變更需要重建容器），最多等 90 秒 `/health`；失敗時印出最近 40 行 log。
 
 Secret 以 `printf '%s'` 寫入（無換行、`umask 077`），不出現在指令列參數或 shell history。重複執行時已存在的檔案預設保留，所以也可以當作「修正權限」使用。
 
@@ -223,9 +236,10 @@ Secret 以 `printf '%s'` 寫入（無換行、`umask 077`），不出現在指�
 |---|---|---|
 | `server.port` | `33444` | 容器內監聽的 port；Dockerfile 的 EXPOSE 與 HEALTHCHECK 也使用 33444 |
 | `database` | `/data/bot.db` | |
-| `github.appId` | | |
-| `github.privateKey` | `/run/secrets/github-app.pem` | 檔案路徑 |
-| `github.webhookSecret` | `/run/secrets/github-webhook-secret` | 檔案路徑 |
+| `github.appsDir` | `/run/secrets/github-apps` | 每個 GitHub App 一個子目錄（見「多個 GitHub App」） |
+| `github.appId` | | 舊版單一 App 設定；有值時仍可使用 |
+| `github.privateKey` | `/run/secrets/github-app.pem` | 舊版單一 App 的私鑰檔路徑 |
+| `github.webhookSecret` | `/run/secrets/github-webhook-secret` | 舊版單一 App 的 webhook secret 檔路徑 |
 | `github.apiUrl` | `https://api.github.com` | GHES：`https://<host>/api/v3` |
 | `discord.token` | `/run/secrets/discord-token` | 檔案路徑 |
 | `reload.intervalMs` | `5000` | |

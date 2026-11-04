@@ -67,6 +67,8 @@ https://git-hooks.example.com/webhooks/github
 - 產生 Private key：在 App 設定頁的**左側選單**點 **Credentials** → **Key pairs** → **New key**，瀏覽器會下載一個 `.pem` 檔。之後要用的是**這個檔案**；頁面上顯示的 `SHA256:...` 只是指紋，不是金鑰。（舊版 GitHub 介面是在 General 頁的 **Private keys** → **Generate a private key**。）
 - 到 App 頁面按 **Install App**，安裝到你的帳號或 Organization，只勾選需要通知的 Repository。
 
+> **要通知多個 Organization？** 私人（Only on this account）的 GitHub App 只能安裝在擁有它的帳號上。請在**每個** Organization 各建立一個 App（設定同上，Webhook URL 都填同一個），之後在設定精靈逐一加入。每個 App 的 Webhook secret 請用不同的字串。
+
 ### 3. 建立 Discord Bot
 
 到 [Discord Developer Portal](https://discord.com/developers/applications) → New Application → Bot：
@@ -100,16 +102,16 @@ cd GitStatus/deploy && sudo ./setup.sh
 
 | 步驟 | 要輸入的內容 |
 |---|---|
-| 1. GitHub App ID | 步驟 2 記下的 App ID |
-| 2. Private key | 精靈會在 `deploy/` 目錄找 `.pem` 檔並詢問 `Is this the correct .pem file you want to use?`，按 Enter 確認。有多個時選編號；還沒放進來的話，放好後按 Enter 重新搜尋，或直接輸入檔案路徑。複製後預設刪除原檔 |
-| 3. Webhook secret | 步驟 2 自訂的字串（輸入兩次確認）。GitHub 之後不會再顯示它；忘記的話留空，精靈會產生一組新的，再到 App 設定的 **Webhook** 按 **Change secret** 貼上並 **Save changes** |
-| 4. Discord Bot Token | 步驟 3 複製的 Token |
+| 1. GitHub Apps | 每個 App 依序輸入：<br>• **App ID**：步驟 2 記下的數字<br>• **Private key**：精靈會在 `deploy/` 目錄找 `.pem` 檔並詢問 `Is this the correct .pem file you want to use?`，按 Enter 確認。有多個時選編號；還沒放進來的話，放好後按 Enter 重新搜尋，或直接輸入檔案路徑。複製後預設刪除原檔<br>• **Webhook secret**：步驟 2 自訂的字串（輸入兩次確認）。GitHub 之後不會再顯示它；忘記的話留空，精靈會產生一組新的，再到 App 設定的 **Webhook** 按 **Change secret** 貼上並 **Save changes**<br>最後會問 `Add another GitHub App?`，有其他 Organization 的 App 就回答 `y` 繼續加入 |
+| 2. Discord Bot Token | 步驟 3 複製的 Token |
 
 每一步都會先顯示這個值在 GitHub / Discord 的哪裡取得。輸入 secret 與 Token 時畫面不會顯示，也不會留在指令歷史紀錄裡。
 
 接著精靈會自動設定好檔案擁有者與權限，並詢問是否啟動服務。選擇啟動後會建置 image（第一次需要幾分鐘），並等到服務正常運作才結束。看到 `OK  The service is running.` 就完成了。
 
-之後要更換 Token 或 secret、或遇到權限問題，再執行一次 `sudo ./setup.sh` 即可；要保留的項目直接按 Enter。
+之後要新增 GitHub App、更換 Token 或 secret、或遇到權限問題，再執行一次 `sudo ./setup.sh` 即可；要保留的項目直接按 Enter。新增 App 後不需要重新啟動服務，到設定畫面的 **Git Provider Sources** 就會看到它的安裝。
+
+從只支援單一 App 的舊版升級時，執行 `sudo ./setup.sh` 會自動把原本的 `secrets/github-app.pem` 與 `secrets/github-webhook-secret` 搬到新的位置，原本的設定照常運作。
 
 ### 5. 確認服務正常
 
@@ -190,7 +192,10 @@ GitHub App 沒有被授權存取它。到 GitHub 的 App 安裝設定中把它�
 - 有顯示清單數量：請確認 cloudflared 和通知服務在同一台主機，並連到 `localhost:33444`。
 
 **GitHub 的 Recent Deliveries 顯示 `401`**
-Webhook secret 不一致。確認 `secrets/github-webhook-secret` 與 GitHub App 設定的完全相同（檔案結尾的換行不影響）。
+Webhook secret 不一致。確認 `secrets/github-apps/<App ID>/webhook-secret` 與**同一個** GitHub App 設定的完全相同（檔案結尾的換行不影響）；也確認這個 App 已經用 `setup.sh` 加入。
+
+**同一個 Repository 收到兩次通知**
+同一個 Organization 裝了兩個 App，而且兩邊都能存取這個 Repository。Repository 清單中會以 `*` 標示；只在其中一個來源啟用它即可。
 
 **Tunnel 相關問題**
 請看 [Cloudflare Tunnel 設定教學](docs/CLOUDFLARE-TUNNEL.md) 的「驗證」與「常見問題」。

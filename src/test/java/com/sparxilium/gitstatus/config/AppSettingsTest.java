@@ -24,10 +24,9 @@ class AppSettingsTest {
 
         List<String> problems = settings("", key, hook, token).setupProblems();
 
-        assertEquals(3, problems.size());
-        assertTrue(problems.contains("github.appId is not configured"));
-        assertTrue(problems.contains("github.webhookSecret secret file is empty: " + hook));
-        assertTrue(problems.contains("discord.token secret file is not readable: " + token));
+        assertEquals(List.of("discord.token secret file is not readable: " + token), problems);
+        Files.writeString(token, "\n");
+        assertEquals(List.of("discord.token secret file is empty: " + token), settings("", key, hook, token).setupProblems());
         assertFalse(problems.toString().contains("secret-key"));
     }
 
@@ -40,7 +39,7 @@ class AppSettingsTest {
     }
 
     private static AppSettings settings(String appId, Path key, Path hook, Path token) {
-        return new AppSettings("bot.db", "https://api.github.com", appId, key.toString(), hook.toString(),
+        return new AppSettings("bot.db", "https://api.github.com", appId, key.toString(), hook.toString(), "",
                 token.toString(), 5000, 1000, 33444);
     }
 }

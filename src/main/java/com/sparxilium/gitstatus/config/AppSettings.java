@@ -22,6 +22,7 @@ public class AppSettings {
     private final String githubAppId;
     private final String githubPrivateKeyPath;
     private final String githubWebhookSecretPath;
+    private final String githubAppsDir;
     private final String discordTokenPath;
     private final long reloadIntervalMs;
     private final int webhookMaxBodyBytes;
@@ -32,6 +33,7 @@ public class AppSettings {
                        @Value("${github.appId:}") String githubAppId,
                        @Value("${github.privateKey:}") String githubPrivateKeyPath,
                        @Value("${github.webhookSecret:}") String githubWebhookSecretPath,
+                       @Value("${github.appsDir:}") String githubAppsDir,
                        @Value("${discord.token:}") String discordTokenPath,
                        @Value("${reload.intervalMs}") long reloadIntervalMs,
                        @Value("${webhook.maxBodyBytes}") int webhookMaxBodyBytes,
@@ -41,6 +43,7 @@ public class AppSettings {
         this.githubAppId = githubAppId.trim();
         this.githubPrivateKeyPath = githubPrivateKeyPath.trim();
         this.githubWebhookSecretPath = githubWebhookSecretPath.trim();
+        this.githubAppsDir = githubAppsDir.trim();
         this.discordTokenPath = discordTokenPath.trim();
         this.reloadIntervalMs = reloadIntervalMs;
         this.webhookMaxBodyBytes = webhookMaxBodyBytes;
@@ -49,33 +52,29 @@ public class AppSettings {
 
     public String database() { return database; }
     public String githubApiUrl() { return githubApiUrl; }
+    /** Single-App setting from before multi-App support (optional). */
     public String githubAppId() { return githubAppId; }
     public String githubPrivateKeyPath() { return githubPrivateKeyPath; }
+    public String githubWebhookSecretPath() { return githubWebhookSecretPath; }
+    /** One sub-directory per GitHub App, named after its App ID. */
+    public String githubAppsDir() { return githubAppsDir; }
     public long reloadIntervalMs() { return reloadIntervalMs; }
     public int webhookMaxBodyBytes() { return webhookMaxBodyBytes; }
     public int serverPort() { return serverPort; }
 
-    public boolean githubConfigured() {
-        return !githubAppId.isEmpty() && Files.isReadable(Path.of(githubPrivateKeyPath));
-    }
-
-    public String readGithubPrivateKey() { return readSecret("github.privateKey", githubPrivateKeyPath); }
-    public String readGithubWebhookSecret() { return readSecret("github.webhookSecret", githubWebhookSecretPath); }
     public String readDiscordToken() { return readSecret("discord.token", discordTokenPath); }
 
-    /** Missing settings and secret files that cannot be read; names and paths only, never content. */
+    /**
+     * Missing settings and secret files that cannot be read; names and paths only, never content.
+     * GitHub Apps are checked by {@code GitHubApps}.
+     */
     public List<String> setupProblems() {
         List<String> problems = new ArrayList<>();
-        if (githubAppId.isEmpty()) {
-            problems.add("github.appId is not configured");
-        }
-        checkSecret(problems, "github.privateKey", githubPrivateKeyPath);
-        checkSecret(problems, "github.webhookSecret", githubWebhookSecretPath);
         checkSecret(problems, "discord.token", discordTokenPath);
         return problems;
     }
 
-    private static void checkSecret(List<String> problems, String setting, String path) {
+    public static void checkSecret(List<String> problems, String setting, String path) {
         try {
             readSecret(setting, path);
         } catch (IllegalStateException e) {
@@ -84,7 +83,7 @@ public class AppSettings {
     }
 
     /** Reads a secret file. The error message names the setting and path, never the content. */
-    static String readSecret(String setting, String path) {
+    public static String readSecret(String setting, String path) {
         if (path == null || path.isEmpty()) {
             throw new IllegalStateException(setting + " is not configured");
         }

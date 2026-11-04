@@ -20,7 +20,7 @@ import com.sparxilium.gitstatus.provider.WebhookAdapter;
 import com.sparxilium.gitstatus.routing.RuleSet;
 
 /**
- * Webhook pipeline: verify → de-duplicate → normalize → route → enqueue.
+ * Webhook pipeline: verify (source, then signature → which App) → de-duplicate → normalize → route → enqueue.
  * Logs metadata only (delivery id, provider, repo id, event type, result, latency); never bodies.
  */
 public class WebhookService {
@@ -63,14 +63,14 @@ public class WebhookService {
             return new Result(400, "missing headers");
         }
 
-        boolean valid;
+        String credential;
         try {
-            valid = adapter.verify(headers, body);
+            credential = adapter.authenticate(headers, body);
         } catch (RuntimeException e) {
             log.error("Webhook secret unavailable: {}", e.getMessage());
             return new Result(503, "unavailable");
         }
-        if (!valid) {
+        if (credential == null) {
             log.warn("Rejected {} webhook delivery={} event={} from {}: invalid signature", provider, deliveryId, event, remoteAddr);
             return new Result(401, "invalid signature");
         }
@@ -99,7 +99,7 @@ public class WebhookService {
         NormalizedEvent last = null;
         for (NormalizedEvent e : events) {
             last = e;
-            List<DiscordDestination> destinations = ruleSet.destinations(e.provider(), e.installationId(), e.repositoryId(), e.eventType());
+            List<DiscordDestination> destinations = ruleSet.destinations(e.provider(), credential, e.installationId(), e.repositoryId(), e.eventType());
             if (destinations.isEmpty()) {
                 continue;
             }

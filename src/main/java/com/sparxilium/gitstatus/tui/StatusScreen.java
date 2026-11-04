@@ -98,16 +98,18 @@ final class StatusScreen extends Tui.View {
 
         sb.append("\nGit Providers\n");
         for (GitProvider p : providers) {
-            sb.append("  ").append(p.displayName()).append(": ");
             if (!p.configured()) {
-                sb.append("not configured\n");
+                sb.append("  ").append(p.displayName()).append(": no App configured\n");
                 continue;
             }
-            try {
-                sb.append("authenticated as ")
-                        .append(tui.busy("Checking " + p.displayName() + " authentication...", p::checkAuth)).append('\n');
-            } catch (RuntimeException e) {
-                sb.append("failed: ").append(Tui.message(e)).append('\n');
+            for (GitProvider.Credential c : p.credentials()) {
+                sb.append("  ").append(p.displayName()).append(' ').append(c.label()).append(": ");
+                try {
+                    sb.append("authenticated as ").append(tui.busy("Checking " + p.displayName() + " " + c.label()
+                            + " authentication...", () -> p.checkAuth(c))).append('\n');
+                } catch (RuntimeException e) {
+                    sb.append("failed: ").append(Tui.message(e)).append('\n');
+                }
             }
         }
         sb.append("  GitLab: not supported yet (Phase 5)\n");

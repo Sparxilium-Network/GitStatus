@@ -2,6 +2,8 @@ package com.sparxilium.gitstatus.provider.github;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.attribute.FileTime;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -32,7 +34,8 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * GitHub App API adapter. Installation access tokens are kept in memory only and refreshed
+ * GitHub App API adapter for any number of Apps ({@link GitHubApps}): each installation is accessed
+ * with the App it belongs to. Installation access tokens are kept in memory only and refreshed
  * before they expire. Only read operations are performed.
  */
 @Component
@@ -46,14 +49,20 @@ public class GitHubProvider implements GitProvider {
     private final AppSettings settings;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private final ObjectMapper json = JsonMapper.builder().build();
+    private final GitHubApps apps;
     private final Map<String, InstallationToken> tokens = new ConcurrentHashMap<>();
-    private volatile GitHubAppAuth auth;
+    private final Map<String, CachedAuth> auths = new ConcurrentHashMap<>();
 
     private record InstallationToken(String value, Instant expiresAt) {
     }
 
-    public GitHubProvider(AppSettings settings) {
+    /** Signing key of one App; re-read when the key file changes (key rotation). */
+    private record CachedAuth(FileTime modified, GitHubAppAuth auth) {
+    }
+
+    public GitHubProvider(AppSettings settings, GitHubApps apps) {
         this.settings = settings;
+        this.apps = apps;
     }
 
     @Override
@@ -67,20 +76,22 @@ public class GitHubProvider implements GitProvider {
     }
 
     @Override
-    public boolean configured() {
-        return settings.githubConfigured();
+    public List<Credential> credentials() {
+        return apps.apps().stream().map(a -> new Credential(a.id(), a.label())).toList();
     }
 
     @Override
-    public String checkAuth() {
-        JsonNode app = getJson(settings.githubApiUrl() + "/app", appJwt());
-        return app.path("slug").asString("?") + " (App ID " + settings.githubAppId() + ")";
+    public String checkAuth(Credential credential) {
+        GitHubApps.App app = app(credential.id());
+        JsonNode body = getJson(settings.githubApiUrl() + "/app", appJwt(app));
+        return body.path("slug").asString("?") + " (App ID " + app.id() + ")";
     }
 
     @Override
-    public List<DiscoveredInstallation> listInstallations() {
+    public List<DiscoveredInstallation> listInstallations(Credential credential) {
+        GitHubApps.App app = app(credential.id());
         List<DiscoveredInstallation> out = new ArrayList<>();
-        for (JsonNode inst : getPaged(settings.githubApiUrl() + "/app/installations?per_page=100", this::appJwt, null)) {
+        for (JsonNode inst : getPaged(settings.githubApiUrl() + "/app/installations?per_page=100", () -> appJwt(app), null)) {
             if (!inst.path("suspended_at").isNull() && !inst.path("suspended_at").isMissingNode()) {
                 continue;
             }
@@ -97,10 +108,9 @@ public class GitHubProvider implements GitProvider {
 
     @Override
     public List<DiscoveredRepository> listRepositories(ProviderInstallation installation) {
-        String installationId = installation.externalId();
         List<DiscoveredRepository> out = new ArrayList<>();
         for (JsonNode repo : getPaged(settings.githubApiUrl() + "/installation/repositories?per_page=100",
-                () -> installationToken(installationId), "repositories")) {
+                () -> installationToken(installation), "repositories")) {
             String visibility = repo.path("visibility").asString("");
             if (visibility.isEmpty()) {
                 visibility = repo.path("private").asBoolean(true) ? "private" : "public";
@@ -136,10 +146,10 @@ public class GitHubProvider implements GitProvider {
      * Authenticated with an installation token when one is given, because the unauthenticated
      * limit (60/h per IP) is easily exhausted on shared egress IPs.
      *
-     * @param installationId any installation of this App, or null for an unauthenticated call
+     * @param installation any installation of a configured App, or null for an unauthenticated call
      */
-    public List<String> hookCidrs(String installationId) {
-        String token = installationId != null && configured() ? installationToken(installationId) : null;
+    public List<String> hookCidrs(ProviderInstallation installation) {
+        String token = installation != null ? installationToken(installation) : null;
         List<String> out = new ArrayList<>();
         getJson(settings.githubApiUrl() + "/meta", token).path("hooks").forEach(n -> out.add(n.asString()));
         if (out.isEmpty()) {
@@ -161,36 +171,39 @@ public class GitHubProvider implements GitProvider {
 
     // ---------------------------------------------------------------- auth
 
-    private GitHubAppAuth auth() {
-        GitHubAppAuth a = auth;
-        if (a == null) {
-            synchronized (this) {
-                if (auth == null) {
-                    if (settings.githubAppId().isEmpty()) {
-                        throw new ProviderException("github.appId is not configured");
-                    }
-                    try {
-                        auth = new GitHubAppAuth(settings.githubAppId(), settings.readGithubPrivateKey());
-                    } catch (IllegalStateException e) {
-                        throw new ProviderException(e.getMessage());
-                    }
-                }
-                a = auth;
-            }
+    private GitHubApps.App app(String appId) {
+        return apps.find(appId).orElseThrow(() -> new ProviderException(
+                appId == null ? "Installation has no GitHub App yet: refresh Git Provider Sources"
+                        : "GitHub App " + appId + " is not configured"));
+    }
+
+    private String appJwt(GitHubApps.App app) {
+        FileTime modified;
+        try {
+            modified = Files.getLastModifiedTime(app.privateKey());
+        } catch (IOException e) {
+            modified = FileTime.fromMillis(0);
         }
-        return a;
+        CachedAuth cached = auths.get(app.id());
+        if (cached == null || !cached.modified().equals(modified)) {
+            try {
+                cached = new CachedAuth(modified, new GitHubAppAuth(app.id(), apps.privateKey(app)));
+            } catch (IllegalStateException e) {
+                throw new ProviderException(e.getMessage());
+            }
+            auths.put(app.id(), cached);
+        }
+        return cached.auth().createJwt(Instant.now());
     }
 
-    private String appJwt() {
-        return auth().createJwt(Instant.now());
-    }
-
-    private String installationToken(String installationId) {
+    private String installationToken(ProviderInstallation installation) {
+        String installationId = installation.externalId();
         InstallationToken cached = tokens.get(installationId);
         if (cached != null && Instant.now().plus(TOKEN_REFRESH_MARGIN).isBefore(cached.expiresAt())) {
             return cached.value();
         }
-        HttpRequest request = baseRequest(settings.githubApiUrl() + "/app/installations/" + installationId + "/access_tokens", appJwt())
+        GitHubApps.App app = app(installation.appId());
+        HttpRequest request = baseRequest(settings.githubApiUrl() + "/app/installations/" + installationId + "/access_tokens", appJwt(app))
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
         JsonNode body = json.readTree(send(request).body());

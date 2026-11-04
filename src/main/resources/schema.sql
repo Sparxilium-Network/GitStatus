@@ -31,6 +31,8 @@ CREATE TABLE IF NOT EXISTS provider_installation (
     permissions TEXT    NOT NULL DEFAULT '{}',
     events      TEXT    NOT NULL DEFAULT '[]',
     updated_at  TEXT    NOT NULL,
+    -- GitHub App ID the installation belongs to (one App per organization for private Apps)
+    app_id      TEXT,
     UNIQUE (provider, external_id)
 );
 

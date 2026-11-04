@@ -42,6 +42,9 @@ import com.sparxilium.gitstatus.routing.RuleSetLoader;
 class WebhookPipelineTest {
 
     private static final String SECRET = "s3cret";
+    private static final String APP = "1001";
+    private static final String OTHER_APP = "2002";
+    private static final String OTHER_SECRET = "other-s3cret";
 
     @TempDir
     Path tmp;
@@ -66,7 +69,7 @@ class WebhookPipelineTest {
         DriverManagerDataSource ds = new DriverManagerDataSource(
                 "jdbc:sqlite:" + db + "?journal_mode=WAL&busy_timeout=5000&foreign_keys=true&transaction_mode=IMMEDIATE");
         JdbcTemplate jdbc = new JdbcTemplate(ds);
-        AppSettings settings = new AppSettings(db, "https://api.github.com", "", "", "", "", 5000, 1_000_000, 33444);
+        AppSettings settings = new AppSettings(db, "https://api.github.com", "", "", "", "", "", 5000, 1_000_000, 33444);
         new SchemaInitializer(jdbc, settings).afterPropertiesSet();
         store = new ConfigStore(jdbc, new TransactionTemplate(new DataSourceTransactionManager(ds)));
         holder = new RuleSetHolder(new RuleSetLoader(jdbc, store), store);
@@ -74,12 +77,12 @@ class WebhookPipelineTest {
 
         DiscordSender sender = (d, m) -> sent.add(new Sent(d.name(), m));
         dispatcher = new NotificationDispatcher(sender, store, 100, 2, 10);
-        GitHubWebhookAdapter adapter = new GitHubWebhookAdapterFactory().create(SECRET);
+        GitHubWebhookAdapter adapter = new GitHubWebhookAdapterFactory().create(Map.of(APP, SECRET, OTHER_APP, OTHER_SECRET));
         service = new WebhookService(p -> "github".equals(p) ? adapter : null, store, holder::current, dispatcher,
                 (p, ip) -> sources.allowed(p, ip));
 
         // configuration as the TUI would write it
-        store.syncInstallations("github", List.of(new DiscoveredInstallation("7", "acme", "Organization",
+        store.syncInstallations("github", APP, List.of(new DiscoveredInstallation("7", "acme", "Organization",
                 "{\"contents\":\"read\",\"actions\":\"read\"}", "[\"push\",\"workflow_run\"]")));
         long instId = store.installations("github").get(0).id();
         store.setInstallationSelected(instId, true);
@@ -103,9 +106,14 @@ class WebhookPipelineTest {
     }
 
     private WebhookService.Result deliver(String event, String delivery, String body, String secret) throws Exception {
+        return deliver(event, delivery, body, secret, secret.equals(OTHER_SECRET) ? OTHER_APP : APP);
+    }
+
+    private WebhookService.Result deliver(String event, String delivery, String body, String secret, String appId) throws Exception {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         Map<String, String> h = new java.util.HashMap<>(Map.of("x-github-event", event, "x-github-delivery", delivery,
-                "content-type", "application/json", "x-hub-signature-256", sign(secret, bytes)));
+                "content-type", "application/json", "x-hub-signature-256", sign(secret, bytes),
+                "x-github-hook-installation-target-type", "integration", "x-github-hook-installation-target-id", appId));
         return service.handle("github", h, bytes, clientIp);
     }
 
@@ -248,13 +256,63 @@ class WebhookPipelineTest {
         assertEquals("NO_ROUTE", deliver("push", "d-8", PUSH, SECRET).body());
     }
 
+    @Test
+    void anotherAppCannotDeliverForThisAppsInstallation() throws Exception {
+        // correctly signed by App 2002, but installation 7 belongs to App 1001
+        assertEquals("NO_ROUTE", deliver("push", "m-1", PUSH, OTHER_SECRET).body());
+        // App 2002's secret does not pass for App 1001
+        assertEquals(401, deliver("push", "m-2", PUSH, OTHER_SECRET, APP).status());
+        awaitSent(0);
+        assertTrue(sent.isEmpty());
+    }
+
+    @Test
+    void secondAppRoutesItsOwnInstallation() throws Exception {
+        store.syncInstallations("github", OTHER_APP, List.of(new DiscoveredInstallation("8", "globex", "Organization",
+                "{\"contents\":\"read\"}", "[\"push\"]")));
+        // syncing App 2002 leaves App 1001's installation alone
+        assertEquals(2, store.installations("github").stream()
+                .filter(i -> i.status() != com.sparxilium.gitstatus.model.Records.InstallationStatus.REVOKED).count());
+        long instId = store.installations("github").stream().filter(i -> i.externalId().equals("8")).findFirst().orElseThrow().id();
+        store.setInstallationSelected(instId, true);
+        store.syncRepositories(instId, List.of(new DiscoveredRepository("99", "globex/web", "PRIVATE", false)));
+        RepositoryRecord web = store.repositories(instId).get(0);
+        store.setSubscribed(web.id(), true);
+        store.saveRules(web.id(), Map.of(alerts.id(), EnumSet.of(EventType.PUSH)));
+        holder.reloadIfChanged();
+
+        String globexPush = PUSH.replace("\"id\":42,\"full_name\":\"acme/api\"", "\"id\":99,\"full_name\":\"globex/web\"")
+                .replace("\"installation\":{\"id\":7}", "\"installation\":{\"id\":8}");
+        assertEquals(202, deliver("push", "m-3", globexPush, OTHER_SECRET).status());
+        assertEquals(202, deliver("push", "m-4", PUSH, SECRET).status());
+        awaitSent(2);
+        assertEquals(List.of("A / #build", "B / #alerts"), sent.stream().map(Sent::destination).sorted().toList());
+    }
+
+    @Test
+    void upgradedInstallationsWithoutAppDoNotRouteUntilAssigned() throws Exception {
+        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:sqlite:" + tmp.resolve("bot.db")));
+        jdbc.update("UPDATE provider_installation SET app_id = NULL");
+        store.mutate(j -> { });
+        holder.reloadIfChanged();
+        assertEquals("NO_ROUTE", deliver("push", "u-1", PUSH, SECRET).body());
+
+        assertEquals(1, store.installationsWithoutApp("github"));
+        store.assignInstallationsWithoutApp("github", APP);
+        holder.reloadIfChanged();
+        assertEquals(202, deliver("push", "u-2", PUSH, SECRET).status());
+        awaitSent(1);
+    }
+
     /** Uses the package-private test constructor. */
     static final class GitHubWebhookAdapterFactory {
-        GitHubWebhookAdapter create(String secret) throws Exception {
-            var ctor = GitHubWebhookAdapter.class.getDeclaredConstructor(java.util.function.Supplier.class);
+        GitHubWebhookAdapter create(Map<String, String> secrets) throws Exception {
+            var ctor = GitHubWebhookAdapter.class.getDeclaredConstructor(java.util.function.Supplier.class,
+                    java.util.function.Function.class);
             ctor.setAccessible(true);
-            java.util.function.Supplier<String> s = () -> secret;
-            return ctor.newInstance(s);
+            java.util.function.Supplier<List<String>> ids = () -> List.copyOf(new java.util.TreeSet<>(secrets.keySet()));
+            java.util.function.Function<String, String> secretOf = secrets::get;
+            return ctor.newInstance(ids, secretOf);
         }
     }
 }

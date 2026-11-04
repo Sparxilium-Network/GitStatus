@@ -9,14 +9,14 @@ import com.sparxilium.gitstatus.model.Records.InstallationStatus;
 import com.sparxilium.gitstatus.model.Records.ProviderInstallation;
 import com.sparxilium.gitstatus.provider.GitProvider;
 
-/** 5.3 Git provider sources: installations authorized for the GitHub App, multi-select. */
+/** 5.3 Git provider sources: installations authorized for each configured GitHub App, multi-select. */
 final class SourcesScreen extends Tui.View {
 
     private final Tui tui;
     private final ConfigStore store;
     private final List<GitProvider> providers;
     private List<ProviderInstallation> installations = List.of();
-    private String syncStatus = "";
+    private List<String> syncStatus = List.of();
 
     SourcesScreen(Tui tui, ConfigStore store, List<GitProvider> providers) {
         this.tui = tui;
@@ -38,9 +38,10 @@ final class SourcesScreen extends Tui.View {
     List<String> header() {
         List<String> lines = new ArrayList<>();
         lines.add("Select the accounts / organizations to notify on");
-        lines.add("(only installations the App is authorized for).");
+        lines.add("(only installations your GitHub Apps are authorized for; a private App");
+        lines.add("can only be installed on its own account, so add one App per organization).");
         lines.add("");
-        lines.add(syncStatus);
+        lines.addAll(syncStatus);
         lines.add("GitLab: not supported yet (Phase 5)");
         if (installations.isEmpty()) {
             lines.add("");
@@ -61,7 +62,8 @@ final class SourcesScreen extends Tui.View {
         }
         return installations.stream()
                 .map(i -> Tui.checkbox(i.status() == InstallationStatus.SELECTED)
-                        + Tui.pad(i.owner(), 32) + " " + Tui.pad(i.type(), 14) + " " + i.provider())
+                        + Tui.pad(i.owner(), 32) + " " + Tui.pad(i.type(), 14) + " " + i.provider()
+                        + (i.appId() == null ? " (no App yet)" : " App " + i.appId()))
                 .toList();
     }
 
@@ -89,21 +91,26 @@ final class SourcesScreen extends Tui.View {
     }
 
     private void refreshFromApi() {
-        StringBuilder status = new StringBuilder();
+        List<String> status = new ArrayList<>();
         for (GitProvider p : providers) {
-            if (!p.configured()) {
-                status.append(p.displayName()).append(": not configured (config.conf / secrets)  ");
+            List<GitProvider.Credential> credentials = p.credentials();
+            if (credentials.isEmpty()) {
+                status.add(p.displayName() + ": no App configured (run setup.sh to add one)");
                 continue;
             }
-            try {
-                var discovered = tui.busy("Loading " + p.displayName() + " installations...", p::listInstallations);
-                store.syncInstallations(p.id(), discovered);
-                status.append(p.displayName()).append(": synced ").append(discovered.size()).append(" source(s)  ");
-            } catch (RuntimeException e) {
-                // keep the cached list; API failure must not overwrite valid configuration
-                status.append(p.displayName()).append(" API failed, showing cached list: ").append(Tui.message(e)).append("  ");
+            for (GitProvider.Credential c : credentials) {
+                String name = p.displayName() + " " + c.label();
+                try {
+                    String identity = tui.busy("Checking " + name + "...", () -> p.checkAuth(c));
+                    var discovered = tui.busy("Loading " + name + " installations...", () -> p.listInstallations(c));
+                    store.syncInstallations(p.id(), c.id(), discovered);
+                    status.add(p.displayName() + " " + identity + ": synced " + discovered.size() + " source(s)");
+                } catch (RuntimeException e) {
+                    // keep the cached list; API failure must not overwrite valid configuration
+                    status.add(name + ": API failed, showing cached list: " + Tui.message(e));
+                }
             }
         }
-        syncStatus = status.toString().trim();
+        syncStatus = status;
     }
 }

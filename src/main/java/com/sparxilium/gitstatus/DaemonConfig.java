@@ -1,5 +1,6 @@
 package com.sparxilium.gitstatus;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -20,6 +21,7 @@ import com.sparxilium.gitstatus.db.ConfigStore;
 import com.sparxilium.gitstatus.notify.DiscordGateway;
 import com.sparxilium.gitstatus.notify.NotificationDispatcher;
 import com.sparxilium.gitstatus.provider.WebhookAdapter;
+import com.sparxilium.gitstatus.provider.github.GitHubApps;
 import com.sparxilium.gitstatus.provider.github.GitHubHookSources;
 import com.sparxilium.gitstatus.routing.RuleSetHolder;
 import com.sparxilium.gitstatus.webhook.WebhookService;
@@ -34,20 +36,23 @@ public class DaemonConfig {
     private final ConfigStore store;
     private final DiscordGateway discord;
     private final AppSettings settings;
+    private final GitHubApps githubApps;
     private final int retentionDays;
     private volatile String lastDiscordError;
 
-    public DaemonConfig(ConfigStore store, DiscordGateway discord, AppSettings settings,
+    public DaemonConfig(ConfigStore store, DiscordGateway discord, AppSettings settings, GitHubApps githubApps,
                         @Value("${deliveryLog.retentionDays}") int retentionDays) {
         this.store = store;
         this.discord = discord;
         this.settings = settings;
+        this.githubApps = githubApps;
         this.retentionDays = retentionDays;
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void warnAboutSetupProblems() {
-        List<String> problems = settings.setupProblems();
+        List<String> problems = new ArrayList<>(githubApps.setupProblems());
+        problems.addAll(settings.setupProblems());
         for (String problem : problems) {
             log.warn("Setup: {}", problem);
         }

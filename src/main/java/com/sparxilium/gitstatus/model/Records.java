@@ -16,9 +16,10 @@ public final class Records {
 
     public enum InstallationStatus { SELECTED, AVAILABLE, REVOKED }
 
+    /** @param appId the GitHub App the installation belongs to; null until the next sync after an upgrade */
     public record ProviderInstallation(long id, String provider, String externalId, String owner,
                                        String type, InstallationStatus status, String permissionsJson,
-                                       String eventsJson) {
+                                       String eventsJson, String appId) {
     }
 
     public record RepositoryRecord(long id, long installationId, String externalRepoId, String fullName,

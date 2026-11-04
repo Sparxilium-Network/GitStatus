@@ -2,6 +2,7 @@ package com.sparxilium.gitstatus.tui;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import com.googlecode.lanterna.input.KeyStroke;
 import com.googlecode.lanterna.input.KeyType;
@@ -21,7 +22,7 @@ final class RepositoriesScreen {
     private record Source(GitProvider provider, ProviderInstallation inst) {
         @Override
         public String toString() {
-            return provider.displayName() + " / " + inst.owner();
+            return provider.displayName() + " / " + inst.owner() + (inst.appId() == null ? "" : "  (App " + inst.appId() + ")");
         }
     }
 
@@ -71,6 +72,7 @@ final class RepositoriesScreen {
         private final GitProvider provider;
         private final ProviderInstallation inst;
         private List<RepositoryRecord> repos = List.of();
+        private Set<String> shared = Set.of();
 
         RepoList(GitProvider provider, ProviderInstallation inst) {
             this.provider = provider;
@@ -87,7 +89,11 @@ final class RepositoriesScreen {
             String type = "Organization".equals(inst.type()) ? "Organization" : "User";
             long enabled = repos.stream().filter(RepositoryRecord::subscribed).count();
             List<String> lines = new ArrayList<>();
-            lines.add(type + ": " + inst.owner() + "    (" + repos.size() + " repos, " + enabled + " enabled)");
+            lines.add(type + ": " + inst.owner() + (inst.appId() == null ? "" : " via App " + inst.appId())
+                    + "    (" + repos.size() + " repos, " + enabled + " enabled)");
+            if (repos.stream().anyMatch(r -> shared.contains(r.externalRepoId()))) {
+                lines.add("* also reachable through another App: enabling it in both sends every notification twice");
+            }
             if (repos.isEmpty()) {
                 lines.add("");
                 lines.add("No repository. Add repositories to the GitHub App installation first.");
@@ -98,9 +104,11 @@ final class RepositoriesScreen {
         @Override
         List<String> rows() {
             repos = store.repositories(inst.id());
+            shared = store.repositoriesInSeveralSources();
             return repos.stream()
                     .map(r -> Tui.checkbox(r.subscribed()) + Tui.pad(r.fullName(), 50) + " "
-                            + (r.archived() ? "ARCHIVED" : r.visibility()))
+                            + (r.archived() ? "ARCHIVED" : r.visibility())
+                            + (shared.contains(r.externalRepoId()) ? "  *" : ""))
                     .toList();
         }
 

@@ -7,8 +7,9 @@
 #   config/config.conf
 #   data/                       writable, owned by uid 10001
 #   secrets/                    owned by uid 10001, chmod 400 files
-#     github-app.pem
-#     github-webhook-secret
+#     github-apps/              one directory per GitHub App (one App per organization)
+#       <App ID>/private-key.pem
+#       <App ID>/webhook-secret
 #     discord-token
 #
 # Admin TUI:  docker compose exec bot java -jar /app/gitstatus.jar admin

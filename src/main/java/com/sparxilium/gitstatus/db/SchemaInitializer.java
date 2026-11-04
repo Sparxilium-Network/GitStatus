@@ -89,6 +89,7 @@ public class SchemaInitializer implements InitializingBean {
     /** Columns added after v1; CREATE TABLE IF NOT EXISTS does not add them to existing databases. */
     private void migrate() {
         addColumnIfMissing("discord_destination", "language", "TEXT NOT NULL DEFAULT 'en'");
+        addColumnIfMissing("provider_installation", "app_id", "TEXT");
     }
 
     private void addColumnIfMissing(String table, String column, String definition) {

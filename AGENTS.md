@@ -67,6 +67,7 @@ mvn -DskipTests package
 - 新增事件：在 `EventType` 加入列舉值 → 在 provider adapter 中正規化 → 在 `GitHubProvider.capabilities` 對應所需權限 → 在 `MessageFormatter` 加入格式 → 補測試。
 - 新增 provider（例如 GitLab）：實作 `GitProvider` 與 `WebhookAdapter` 並註冊為 Spring bean，不要改動路由與發送層。
 - GitHub App 只申請 Read 權限。
+- 支援多個 GitHub App（每個 Organization 一個私人 App）：安裝一律記錄所屬 `app_id`，API 呼叫用該 App 的憑證，webhook 只能路由到簽章 App 自己的安裝。不要假設只有一個 App。
 
 ## 程式風格
 
@@ -82,7 +83,7 @@ mvn -DskipTests package
 
 - `README.md`：給一般使用者（安裝、設定、常見問題），不放技術細節。
 - `DEV-README.md`：技術細節（架構、資料模型、安全對照、測試、擴充方式）。
-- `deploy/setup.sh`：使用者的設定精靈（App ID、secret 檔、擁有者與權限、啟動）。新增 secret 或改變部署目錄結構時要同步修改。
+- `deploy/setup.sh`：使用者的設定精靈（一或多個 GitHub App、secret 檔、擁有者與權限、啟動）。新增 secret 或改變部署目錄結構時要同步修改。
 - `docs/CLOUDFLARE-TUNNEL.md`：給使用者自行架設 Cloudflare Tunnel 的填空式教學；範本在 `deploy/tunnel/`。服務 port 預設 33444。
 - 改動功能時同步更新對應文件。
 - 待辦：Phase 5（Security 事件、GitLab Adapter）、Phase 6（外部 Queue、Multi-bot；`bot_profile` 欄位已預留）。

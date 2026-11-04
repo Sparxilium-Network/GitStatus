@@ -8,18 +8,26 @@ import com.sparxilium.gitstatus.model.Records.DiscordDestination;
 
 /**
  * Immutable routing snapshot: Repository × Event Type → Discord Destinations.
- * Only contains routes that are fully active (installation selected, repository accessible and
+ * Only contains routes that are fully active (installation selected and assigned to an App, repository accessible and
  * subscribed, rule enabled, destination enabled).
  */
 public record RuleSet(long revision, Map<RepoKey, Map<EventType, List<DiscordDestination>>> routes) {
 
     public static final RuleSet EMPTY = new RuleSet(-1, Map.of());
 
-    public record RepoKey(String provider, String installationId, String repositoryId) {
+    /**
+     * @param appId the App whose webhook secret must have signed the delivery; an event signed by
+     *              another App never reaches this installation's routes
+     */
+    public record RepoKey(String provider, String appId, String installationId, String repositoryId) {
     }
 
-    public List<DiscordDestination> destinations(String provider, String installationId, String repositoryId, EventType type) {
-        Map<EventType, List<DiscordDestination>> byEvent = routes.get(new RepoKey(provider, installationId, repositoryId));
+    public List<DiscordDestination> destinations(String provider, String appId, String installationId, String repositoryId,
+                                                 EventType type) {
+        if (appId == null) {
+            return List.of();
+        }
+        Map<EventType, List<DiscordDestination>> byEvent = routes.get(new RepoKey(provider, appId, installationId, repositoryId));
         if (byEvent == null) {
             return List.of();
         }

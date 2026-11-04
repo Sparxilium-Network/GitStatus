@@ -2,6 +2,7 @@ package com.sparxilium.gitstatus.provider.github;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
@@ -21,7 +22,7 @@ import com.sparxilium.gitstatus.model.NormalizedEvent;
 class GitHubWebhookAdapterTest {
 
     static final String SECRET = "s3cret";
-    private final GitHubWebhookAdapter adapter = new GitHubWebhookAdapter(() -> SECRET);
+    private final GitHubWebhookAdapter adapter = new GitHubWebhookAdapter(() -> List.of("1"), id -> SECRET);
 
     static String sign(String secret, byte[] body) throws Exception {
         Mac mac = Mac.getInstance("HmacSHA256");
@@ -51,12 +52,50 @@ class GitHubWebhookAdapterTest {
     @Test
     void verifiesSignature() throws Exception {
         byte[] body = PUSH.getBytes(StandardCharsets.UTF_8);
-        assertTrue(adapter.verify(headers("push", "d1", sign(SECRET, body)), body));
-        assertFalse(adapter.verify(headers("push", "d1", sign("wrong", body)), body));
-        assertFalse(adapter.verify(headers("push", "d1", null), body));
-        assertFalse(adapter.verify(headers("push", "d1", "sha256=zz"), body));
+        assertEquals("1", adapter.authenticate(headers("push", "d1", sign(SECRET, body)), body));
+        assertNull(adapter.authenticate(headers("push", "d1", sign("wrong", body)), body));
+        assertNull(adapter.authenticate(headers("push", "d1", null), body));
+        assertNull(adapter.authenticate(headers("push", "d1", "sha256=zz"), body));
         byte[] tampered = PUSH.replace("alice", "mallory").getBytes(StandardCharsets.UTF_8);
-        assertFalse(adapter.verify(headers("push", "d1", sign(SECRET, body)), tampered));
+        assertNull(adapter.authenticate(headers("push", "d1", sign(SECRET, body)), tampered));
+    }
+
+    private static final Map<String, String> APP_SECRETS = Map.of("111", "secret-a", "222", "secret-b");
+    private final GitHubWebhookAdapter twoApps = new GitHubWebhookAdapter(
+            () -> List.of("111", "222"), id -> {
+                if (!APP_SECRETS.containsKey(id)) {
+                    throw new IllegalStateException("unknown App " + id);
+                }
+                return APP_SECRETS.get(id);
+            });
+
+    private static Map<String, String> fromApp(String appId, String signature) {
+        Map<String, String> h = headers("push", "d1", signature);
+        h.put("x-github-hook-installation-target-type", "integration");
+        h.put("x-github-hook-installation-target-id", appId);
+        return h;
+    }
+
+    @Test
+    void identifiesTheAppThatSignedTheDelivery() throws Exception {
+        byte[] body = PUSH.getBytes(StandardCharsets.UTF_8);
+        assertEquals("111", twoApps.authenticate(fromApp("111", sign("secret-a", body)), body));
+        assertEquals("222", twoApps.authenticate(fromApp("222", sign("secret-b", body)), body));
+        // the target header only picks the secret: claiming App 222 with App 111's signature fails
+        assertNull(twoApps.authenticate(fromApp("222", sign("secret-a", body)), body));
+        // an App that is not configured here
+        assertNull(twoApps.authenticate(fromApp("999", sign("secret-a", body)), body));
+        // without the header every App's secret is tried
+        assertEquals("222", twoApps.authenticate(headers("push", "d1", sign("secret-b", body)), body));
+        assertNull(twoApps.authenticate(headers("push", "d1", sign("other", body)), body));
+    }
+
+    @Test
+    void appsSharingASecretAreAmbiguousWithoutTheTargetHeader() throws Exception {
+        GitHubWebhookAdapter shared = new GitHubWebhookAdapter(() -> List.of("111", "222"), id -> "same");
+        byte[] body = PUSH.getBytes(StandardCharsets.UTF_8);
+        assertNull(shared.authenticate(headers("push", "d1", sign("same", body)), body));
+        assertEquals("222", shared.authenticate(fromApp("222", sign("same", body)), body));
     }
 
     @Test

@@ -18,13 +18,22 @@ public interface GitProvider {
 
     String displayName();
 
-    boolean configured();
+    /** One set of credentials, e.g. one GitHub App. */
+    record Credential(String id, String label) {
+    }
+
+    /** Configured credential sets; empty when the provider is not set up. */
+    List<Credential> credentials();
+
+    default boolean configured() {
+        return !credentials().isEmpty();
+    }
 
     /** Verifies credentials; returns a short human-readable identity (e.g. the App slug). */
-    String checkAuth();
+    String checkAuth(Credential credential);
 
-    /** Installations / accounts this provider credential is authorized for. Never more. */
-    List<DiscoveredInstallation> listInstallations();
+    /** Installations / accounts this credential is authorized for. Never more. */
+    List<DiscoveredInstallation> listInstallations(Credential credential);
 
     /** Repositories the installation is actually authorized to access. */
     List<DiscoveredRepository> listRepositories(ProviderInstallation installation);

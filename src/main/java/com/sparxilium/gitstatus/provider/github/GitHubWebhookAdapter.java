@@ -10,6 +10,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import javax.crypto.Mac;
@@ -18,7 +19,6 @@ import javax.crypto.spec.SecretKeySpec;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import com.sparxilium.gitstatus.config.AppSettings;
 import com.sparxilium.gitstatus.model.EventType;
 import com.sparxilium.gitstatus.model.NormalizedEvent;
 import com.sparxilium.gitstatus.provider.WebhookAdapter;
@@ -28,23 +28,30 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * GitHub webhook: verifies {@code X-Hub-Signature-256} and maps push, pull_request,
+ * GitHub webhook: verifies {@code X-Hub-Signature-256} against the sending App's secret and maps push, pull_request,
  * workflow_run and release deliveries to {@link NormalizedEvent}. Only allowlisted
  * fields are copied out of the payload.
  */
 @Component
 public class GitHubWebhookAdapter implements WebhookAdapter {
 
-    private final Supplier<String> secret;
+    private final Supplier<List<String>> appIds;
+    private final Function<String, String> secretOf;
     private final ObjectMapper json = JsonMapper.builder().build();
 
     @Autowired
-    public GitHubWebhookAdapter(AppSettings settings) {
-        this(settings::readGithubWebhookSecret);
+    public GitHubWebhookAdapter(GitHubApps apps) {
+        this(apps::ids, id -> apps.find(id).map(apps::webhookSecret)
+                .orElseThrow(() -> new IllegalStateException("GitHub App " + id + " is no longer configured")));
     }
 
-    GitHubWebhookAdapter(Supplier<String> secret) {
-        this.secret = secret;
+    /**
+     * @param appIds   the configured App IDs
+     * @param secretOf an App's webhook secret; throws IllegalStateException if it cannot be read
+     */
+    GitHubWebhookAdapter(Supplier<List<String>> appIds, Function<String, String> secretOf) {
+        this.appIds = appIds;
+        this.secretOf = secretOf;
     }
 
     @Override
@@ -62,23 +69,62 @@ public class GitHubWebhookAdapter implements WebhookAdapter {
         return headers.get("x-github-event");
     }
 
+    /**
+     * GitHub names the App that sent an App webhook in {@code X-GitHub-Hook-Installation-Target-ID}
+     * (target type {@code integration}). That header is not signed, so it only picks which App's
+     * secret to check; the HMAC has to match that secret. Without the header every App's secret is
+     * tried and exactly one has to match.
+     */
     @Override
-    public boolean verify(Map<String, String> headers, byte[] body) {
+    public String authenticate(Map<String, String> headers, byte[] body) {
         String header = headers.get("x-hub-signature-256");
         if (header == null || !header.startsWith("sha256=")) {
-            return false;
+            return null;
         }
-        byte[] expected;
         byte[] given;
         try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.get().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-            expected = mac.doFinal(body);
             given = HexFormat.of().parseHex(header.substring(7));
-        } catch (GeneralSecurityException | IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        List<String> configured = appIds.get();
+        String targetType = headers.get("x-github-hook-installation-target-type");
+        String targetId = headers.get("x-github-hook-installation-target-id");
+        if ("integration".equals(targetType) && targetId != null) {
+            return configured.contains(targetId) && signedBy(targetId, body, given) ? targetId : null;
+        }
+        String matched = null;
+        IllegalStateException unreadable = null;
+        for (String appId : configured) {
+            boolean ok;
+            try {
+                ok = signedBy(appId, body, given);
+            } catch (IllegalStateException e) {
+                unreadable = e;
+                continue;
+            }
+            if (ok) {
+                if (matched != null) {
+                    return null; // two Apps share the secret: cannot tell which one sent it
+                }
+                matched = appId;
+            }
+        }
+        if (matched == null && unreadable != null) {
+            throw unreadable;
+        }
+        return matched;
+    }
+
+    private boolean signedBy(String appId, byte[] body, byte[] given) {
+        String secret = secretOf.apply(appId);
+        try {
+            Mac mac = Mac.getInstance("HmacSHA256");
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            return MessageDigest.isEqual(mac.doFinal(body), given);
+        } catch (GeneralSecurityException e) {
             return false;
         }
-        return MessageDigest.isEqual(expected, given);
     }
 
     @Override

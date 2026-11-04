@@ -47,9 +47,9 @@ public class GitHubHookSources implements SourceVerifier, InitializingBean {
     private volatile long lastSuccess;
 
     @Autowired
-    public GitHubHookSources(GitHubProvider github, ConfigStore store, @Value("${webhook.verifySource}") boolean enabled,
+    public GitHubHookSources(GitHubProvider github, GitHubApps apps, ConfigStore store, @Value("${webhook.verifySource}") boolean enabled,
                              @Value("${webhook.sourceRefreshMs}") long refreshIntervalMs) {
-        this(() -> github.hookCidrs(anyInstallation(store)), store, enabled, refreshIntervalMs);
+        this(() -> github.hookCidrs(anyInstallation(store, apps)), store, enabled, refreshIntervalMs);
     }
 
     public GitHubHookSources(Supplier<List<String>> fetch, ConfigStore store, boolean enabled) {
@@ -63,10 +63,10 @@ public class GitHubHookSources implements SourceVerifier, InitializingBean {
         this.refreshIntervalMs = refreshIntervalMs;
     }
 
-    private static String anyInstallation(ConfigStore store) {
+    private static ProviderInstallation anyInstallation(ConfigStore store, GitHubApps apps) {
+        List<String> configured = apps.ids();
         return store.installations(GitHubProvider.ID).stream()
-                .filter(i -> i.status() != InstallationStatus.REVOKED)
-                .map(ProviderInstallation::externalId)
+                .filter(i -> i.status() != InstallationStatus.REVOKED && configured.contains(i.appId()))
                 .findFirst().orElse(null);
     }
 

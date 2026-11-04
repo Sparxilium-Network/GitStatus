@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Interactive setup for this deploy directory:
-#   GitHub App ID -> config/config.conf
-#   secrets/github-app.pem, secrets/github-webhook-secret, secrets/discord-token
+#   one or more GitHub Apps -> secrets/github-apps/<App ID>/private-key.pem and webhook-secret
+#   secrets/discord-token
 #   ownership and permissions for data/ and secrets/ (the container runs as uid 10001)
 #   optionally starts the service and waits for /health
 #
@@ -24,8 +24,9 @@ if [ -t 0 ]; then
 fi
 
 CONFIG=config/config.conf
-KEY=secrets/github-app.pem
-HOOK=secrets/github-webhook-secret
+APPS=secrets/github-apps
+LEGACY_KEY=secrets/github-app.pem
+LEGACY_HOOK=secrets/github-webhook-secret
 TOKEN=secrets/discord-token
 USER_HOME=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)
 
@@ -70,33 +71,28 @@ expand_path() {
 }
 
 [ -f "$CONFIG" ] || fail "$CONFIG not found. Run this script from the deploy directory of the project."
-mkdir -p data secrets
+mkdir -p data "$APPS"
 
-# ---- 1. GitHub App ID -------------------------------------------------------
-bold "1/5  GitHub App ID"
-cat <<'EOF'
-  Where to get it: GitHub -> Settings -> Developer settings -> GitHub Apps -> your app -> Edit
-  -> General -> "About" -> "App ID" (a number, e.g. 1234567). Not the Client ID (Iv23...).
+# ---- GitHub App helpers -----------------------------------------------------
+# read_app_id [DEFAULT]: sets APP_ID
+read_app_id() {
+  cat <<'EOF'
+  App ID: GitHub -> Settings (of the user or organization that owns the App) -> Developer settings
+  -> GitHub Apps -> the app -> Edit -> General -> "About" -> "App ID" (a number, e.g. 1234567).
+  Not the Client ID (Iv23...).
 EOF
-current=$(sed -n 's/^github\.appId=//p' "$CONFIG" | tr -d '[:space:]')
-while true; do
-  read -rp "  App ID${current:+ [$current]}: " app_id
-  app_id=${app_id:-$current}
-  [[ $app_id =~ ^[0-9]+$ ]] && break
-  if [[ $app_id == Iv* ]]; then
-    warn "That is the Client ID. Use the App ID shown just above it (numbers only)."
-  else
-    warn "The App ID is a number, for example 1234567."
-  fi
-done
-if grep -q '^github\.appId=' "$CONFIG"; then
-  sed -i "s/^github\.appId=.*/github.appId=$app_id/" "$CONFIG"
-else
-  printf '\ngithub.appId=%s\n' "$app_id" >> "$CONFIG"
-fi
-ok "github.appId=$app_id"
+  while true; do
+    read -rp "  App ID${1:+ [$1]}: " APP_ID
+    APP_ID=${APP_ID:-${1:-}}
+    [[ $APP_ID =~ ^[0-9]+$ ]] && return 0
+    if [[ $APP_ID == Iv* ]]; then
+      warn "That is the Client ID. Use the App ID shown just above it (numbers only)."
+    else
+      warn "The App ID is a number, for example 1234567."
+    fi
+  done
+}
 
-# ---- 2. GitHub App private key ---------------------------------------------
 # use_pem FILE: validates and copies FILE to $KEY
 use_pem() {
   if [ ! -f "$1" ]; then
@@ -115,32 +111,32 @@ use_pem() {
   fi
 }
 
-bold "2/5  GitHub App private key (.pem file)"
-server=$(hostname -I 2>/dev/null | awk '{print $1}')
-cat <<EOF
-  Where to get it: GitHub -> Settings -> Developer settings -> GitHub Apps -> your app -> Edit
-  -> left sidebar "Credentials" -> "Key pairs" -> "New key". Your browser downloads a .pem file.
-  Put that file in this directory: $PWD
+# pick_pem: finds the .pem in this directory (or asks for a path) and copies it to $KEY
+pick_pem() {
+  local server pems n pem
+  server=$(hostname -I 2>/dev/null | awk '{print $1}')
+  cat <<EOF
+  Private key: in the same App -> Edit -> left sidebar "Credentials" -> "Key pairs" -> "New key".
+  Your browser downloads a .pem file. Put that file in this directory: $PWD
   For example, run on your own computer:
       scp ~/Downloads/<file>.pem ${SUDO_USER:-user}@${server:-this-server}:$PWD/
 EOF
-if ! keep_existing "$KEY" "The private key"; then
   while true; do
     mapfile -t pems < <(find "$PWD" -maxdepth 1 -name '*.pem' -type f | sort)
     echo
     if [ ${#pems[@]} -eq 1 ]; then
       echo "  Found: ${pems[0]}"
       if ask_yes "Is this the correct .pem file you want to use?" Y; then
-        use_pem "${pems[0]}" && break
+        use_pem "${pems[0]}" && return 0
       fi
     elif [ ${#pems[@]} -gt 1 ]; then
       echo "  Found ${#pems[@]} .pem files:"
       for i in "${!pems[@]}"; do
         printf '    %d) %s\n' $((i + 1)) "${pems[i]}"
       done
-      read -rp "  Which one is the GitHub App private key? [1-${#pems[@]}]: " n
+      read -rp "  Which one is the private key of App $APP_ID? [1-${#pems[@]}]: " n
       if [[ $n =~ ^[0-9]+$ ]] && [ "$n" -ge 1 ] && [ "$n" -le ${#pems[@]} ]; then
-        use_pem "${pems[n - 1]}" && break
+        use_pem "${pems[n - 1]}" && return 0
       else
         warn "Not one of the numbers above."
       fi
@@ -149,26 +145,27 @@ if ! keep_existing "$KEY" "The private key"; then
     fi
     read -rp "  Press Enter to search again, or type the path of the .pem file: " pem
     if [ -n "$pem" ]; then
-      use_pem "$(expand_path "$pem")" && break
+      use_pem "$(expand_path "$pem")" && return 0
     fi
   done
-fi
+}
 
-# ---- 3. Webhook secret -----------------------------------------------------
-bold "3/5  GitHub webhook secret"
-cat <<'EOF'
-  The text you typed into "Webhook secret" when creating the GitHub App. GitHub never shows it
-  again (the page only says "There is currently a secret configured"). If you do not remember
-  it, leave this empty: a new one is generated, then in the GitHub App -> Edit -> General ->
+# ask_webhook_secret: writes $HOOK
+ask_webhook_secret() {
+  local secret again
+  cat <<'EOF'
+  Webhook secret: the text you typed into "Webhook secret" when creating this App. GitHub never
+  shows it again (the page only says "There is currently a secret configured"). If you do not
+  remember it, leave this empty: a new one is generated, then in the App -> Edit -> General ->
   "Webhook" click "Change secret", paste it and click "Save changes".
+  Use a different secret for every App.
 EOF
-if ! keep_existing "$HOOK" "The webhook secret"; then
   while true; do
     secret=$(read_hidden "Webhook secret (hidden)")
     if [ -z "$secret" ]; then
       secret=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')
       echo
-      echo "  Generated webhook secret (shown once):"
+      echo "  Generated webhook secret for App $APP_ID (shown once):"
       echo
       echo "      $secret"
       echo
@@ -181,12 +178,86 @@ if ! keep_existing "$HOOK" "The webhook secret"; then
     warn "The two entries do not match. Try again."
   done
   write_secret "$HOOK" "$secret"
-  unset secret again
   ok "Saved $HOOK"
+}
+
+# add_app: asks for one App's ID, private key and webhook secret
+add_app() {
+  echo
+  read_app_id
+  mkdir -p "$APPS/$APP_ID"
+  KEY=$APPS/$APP_ID/private-key.pem
+  HOOK=$APPS/$APP_ID/webhook-secret
+  echo
+  if ! keep_existing "$KEY" "The private key of App $APP_ID"; then
+    pick_pem
+  fi
+  echo
+  if ! keep_existing "$HOOK" "The webhook secret of App $APP_ID"; then
+    ask_webhook_secret
+  fi
+  ok "GitHub App $APP_ID is set up"
+}
+
+list_apps() {
+  local d id state
+  for d in "$APPS"/*/; do
+    [ -d "$d" ] || continue
+    id=$(basename "$d")
+    state=""
+    [ -s "$d/private-key.pem" ] || state="missing private-key.pem"
+    [ -s "$d/webhook-secret" ] || state="${state:+$state, }missing webhook-secret"
+    printf '    App %-12s %s\n' "$id" "${state:-ready}"
+  done
+}
+
+app_count() {
+  find "$APPS" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' | wc -l
+}
+
+# ---- Upgrade: single-App files from earlier releases ------------------------
+if [ -f "$LEGACY_KEY" ] || [ -f "$LEGACY_HOOK" ]; then
+  bold "Moving the GitHub App from the earlier single-App layout"
+  echo "  Found $LEGACY_KEY / $LEGACY_HOOK. Each App now has its own directory under $APPS/."
+  legacy_id=$(sed -n 's/^github\.appId=//p' "$CONFIG" | tr -d '[:space:]')
+  if [[ $legacy_id =~ ^[0-9]+$ ]]; then
+    APP_ID=$legacy_id
+  else
+    echo "  Which App do these files belong to?"
+    read_app_id
+  fi
+  mkdir -p "$APPS/$APP_ID"
+  [ -f "$LEGACY_KEY" ] && mv -f "$LEGACY_KEY" "$APPS/$APP_ID/private-key.pem"
+  [ -f "$LEGACY_HOOK" ] && mv -f "$LEGACY_HOOK" "$APPS/$APP_ID/webhook-secret"
+  ok "Moved to $APPS/$APP_ID/"
 fi
 
-# ---- 4. Discord bot token --------------------------------------------------
-bold "4/5  Discord bot token"
+# ---- 1. GitHub Apps ---------------------------------------------------------
+bold "1/3  GitHub Apps"
+cat <<'EOF'
+  A private GitHub App can only be installed on the account that owns it. To get notifications
+  from several organizations, create one App in each organization and add each one here.
+  All Apps use the same Webhook URL: https://<your tunnel host>/webhooks/github
+EOF
+if [ "$(app_count)" -eq 0 ]; then
+  add_app
+else
+  echo
+  echo "  Configured:"
+  list_apps
+  echo
+  if ask_yes "Change the private key or webhook secret of one of them?" N; then
+    add_app
+  fi
+fi
+echo
+while ask_yes "Add another GitHub App?" N; do
+  add_app
+  echo
+done
+
+# ---- 2. Discord bot token --------------------------------------------------
+bold "2/3  Discord bot token"
 cat <<'EOF'
   Where to get it: https://discord.com/developers/applications -> your application -> "Bot"
   -> "Reset Token" -> "Copy". It looks like  MTIz...xyz.Gh1abc.AbCd...  (three parts with dots).
@@ -209,14 +280,18 @@ if ! keep_existing "$TOKEN" "The Discord token"; then
   ok "Saved $TOKEN"
 fi
 
-# ---- 5. Ownership and permissions ------------------------------------------
-bold "5/5  Ownership and permissions  (container user uid $SERVICE_UID)"
+# ---- 3. Ownership and permissions ------------------------------------------
+bold "3/3  Ownership and permissions  (container user uid $SERVICE_UID)"
 chown -R "$SERVICE_UID:$SERVICE_UID" data secrets
-chmod 700 data secrets
-chmod 400 "$KEY" "$HOOK" "$TOKEN"
+chmod 700 data
+find secrets -type d -exec chmod 700 {} +
+find secrets -type f -exec chmod 400 {} +
 chmod 644 "$CONFIG"
-ls -ln "$KEY" "$HOOK" "$TOKEN" | sed 's/^/  /'
+find secrets -type f | sort | xargs ls -ln | sed 's/^/  /'
 ok "data/ and secrets/ belong to uid $SERVICE_UID"
+echo
+echo "  GitHub Apps:"
+list_apps
 
 # ---- Start -----------------------------------------------------------------
 health() {

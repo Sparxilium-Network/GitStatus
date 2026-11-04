@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.function.Consumer;
 
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -119,20 +120,19 @@ public class ConfigStore {
 
     // ---------------------------------------------------------------- installations
 
+    private static final String INSTALLATION_COLUMNS =
+            "SELECT id, provider, external_id, owner, type, status, permissions, events, app_id FROM provider_installation ";
+
+    private static final RowMapper<ProviderInstallation> INSTALLATION = (rs, i) -> new ProviderInstallation(rs.getLong(1),
+            rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5), InstallationStatus.valueOf(rs.getString(6)),
+            rs.getString(7), rs.getString(8), rs.getString(9));
+
     public List<ProviderInstallation> installations(String provider) {
-        return jdbc.query("SELECT id, provider, external_id, owner, type, status, permissions, events "
-                + "FROM provider_installation WHERE provider = ? ORDER BY owner",
-                (rs, i) -> new ProviderInstallation(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                        rs.getString(5), InstallationStatus.valueOf(rs.getString(6)), rs.getString(7), rs.getString(8)),
-                provider);
+        return jdbc.query(INSTALLATION_COLUMNS + "WHERE provider = ? ORDER BY app_id, owner", INSTALLATION, provider);
     }
 
     public Optional<ProviderInstallation> installation(long id) {
-        return jdbc.query("SELECT id, provider, external_id, owner, type, status, permissions, events "
-                + "FROM provider_installation WHERE id = ?",
-                (rs, i) -> new ProviderInstallation(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                        rs.getString(5), InstallationStatus.valueOf(rs.getString(6)), rs.getString(7), rs.getString(8)),
-                id).stream().findFirst();
+        return jdbc.query(INSTALLATION_COLUMNS + "WHERE id = ?", INSTALLATION, id).stream().findFirst();
     }
 
     /** Snapshot of an installation as returned by a provider API. */
@@ -141,23 +141,24 @@ public class ConfigStore {
     }
 
     /**
-     * Upserts the provider's installation list. New installations start as AVAILABLE (not selected);
-     * installations missing from the API response become REVOKED.
+     * Upserts the installation list of one App. New installations start as AVAILABLE (not selected);
+     * installations of this App missing from the API response become REVOKED. Other Apps are untouched.
      */
-    public void syncInstallations(String provider, List<DiscoveredInstallation> discovered) {
+    public void syncInstallations(String provider, String appId, List<DiscoveredInstallation> discovered) {
         mutate(j -> {
             String now = now();
             Set<String> seen = new HashSet<>();
             for (DiscoveredInstallation d : discovered) {
                 seen.add(d.externalId());
-                j.update("INSERT INTO provider_installation (provider, external_id, owner, type, status, permissions, events, updated_at) "
-                        + "VALUES (?, ?, ?, ?, 'AVAILABLE', ?, ?, ?) ON CONFLICT (provider, external_id) DO UPDATE SET "
+                j.update("INSERT INTO provider_installation (provider, external_id, owner, type, status, permissions, events, updated_at, app_id) "
+                        + "VALUES (?, ?, ?, ?, 'AVAILABLE', ?, ?, ?, ?) ON CONFLICT (provider, external_id) DO UPDATE SET "
                         + "owner = excluded.owner, type = excluded.type, permissions = excluded.permissions, "
-                        + "events = excluded.events, updated_at = excluded.updated_at, "
+                        + "events = excluded.events, updated_at = excluded.updated_at, app_id = excluded.app_id, "
                         + "status = CASE WHEN provider_installation.status = 'REVOKED' THEN 'AVAILABLE' ELSE provider_installation.status END",
-                        provider, d.externalId(), d.owner(), d.type(), d.permissionsJson(), d.eventsJson(), now);
+                        provider, d.externalId(), d.owner(), d.type(), d.permissionsJson(), d.eventsJson(), now, appId);
             }
-            for (ProviderInstallation existing : installationsIn(j, provider)) {
+            for (ProviderInstallation existing : j.query(INSTALLATION_COLUMNS + "WHERE provider = ? AND app_id IS ?",
+                    INSTALLATION, provider, appId)) {
                 if (!seen.contains(existing.externalId())) {
                     j.update("UPDATE provider_installation SET status = 'REVOKED', updated_at = ? WHERE id = ?", now, existing.id());
                 }
@@ -165,12 +166,15 @@ public class ConfigStore {
         });
     }
 
-    private static List<ProviderInstallation> installationsIn(JdbcTemplate j, String provider) {
-        return j.query("SELECT id, provider, external_id, owner, type, status, permissions, events "
-                + "FROM provider_installation WHERE provider = ?",
-                (rs, i) -> new ProviderInstallation(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
-                        rs.getString(5), InstallationStatus.valueOf(rs.getString(6)), rs.getString(7), rs.getString(8)),
-                provider);
+    /** Installations saved before multi-App support have no App; returns how many. */
+    public int installationsWithoutApp(String provider) {
+        return jdbc.queryForObject("SELECT COUNT(*) FROM provider_installation WHERE provider = ? AND app_id IS NULL",
+                Integer.class, provider);
+    }
+
+    /** Assigns installations that have no App yet to {@code appId} (upgrade from a single-App setup). */
+    public void assignInstallationsWithoutApp(String provider, String appId) {
+        mutate(j -> j.update("UPDATE provider_installation SET app_id = ? WHERE provider = ? AND app_id IS NULL", appId, provider));
     }
 
     public void setInstallationSelected(long id, boolean selected) {
@@ -215,6 +219,17 @@ public class ConfigStore {
                 (rs, i) -> new RepositoryRecord(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4),
                         rs.getString(5), rs.getInt(6) != 0, rs.getInt(7) != 0, rs.getInt(8) != 0),
                 installationId);
+    }
+
+    /**
+     * Repository ids that are accessible through more than one active installation, e.g. when two
+     * GitHub Apps are installed on the same organization. Subscribing both copies sends twice.
+     */
+    public Set<String> repositoriesInSeveralSources() {
+        return new HashSet<>(jdbc.queryForList("SELECT r.external_repo_id FROM repository r "
+                + "JOIN provider_installation pi ON pi.id = r.installation_id AND pi.status <> 'REVOKED' "
+                + "WHERE r.accessible = 1 GROUP BY pi.provider, r.external_repo_id HAVING COUNT(DISTINCT r.installation_id) > 1",
+                String.class));
     }
 
     public void setSubscribed(long repositoryId, boolean enabled) {
