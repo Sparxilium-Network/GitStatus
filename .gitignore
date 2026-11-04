@@ -11,3 +11,4 @@ deploy/tunnel/token
 deploy/tunnel/*.json
 deploy/tunnel/config.yml
 deploy/*.pem
+.claude/
