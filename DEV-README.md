@@ -231,6 +231,7 @@ GitHub → Cloudflare → 使用者的 cloudflared（主機上）→ 127.0.0.1:3
 
 0. `config/config.conf`：不存在時從 `config.conf.example` 建立；沒有 `config.version` 時在開頭補上 `config.version=1`；版本比腳本的 `CONFIG_VERSION` 新時中止；較舊時依序執行 `upgrade` 步驟（`case $config_version in N) ...`）並更新版本號。
 1. 升級：若有舊版的 `secrets/github-app.pem` / `secrets/github-webhook-secret`，搬到 `secrets/github-apps/<App ID>/`（App ID 取自 `config.conf` 的 `github.appId`，沒有就詢問）。
+   - 模式選擇：已安裝（每個 App 都有 key 和 secret，而且有 Discord token）時，顯示 `1) Upgrade`（預設）/ `2) Setup`。Upgrade 跳過步驟 2、3，直接修正權限並重建啟動，不再詢問。`sudo ./setup.sh upgrade` 不顯示選單直接 Upgrade；尚未安裝時以這個參數執行會中止。腳本不執行 `git pull`。
 2. GitHub Apps：沒有任何 App 時直接新增一個；已有 App 時列出狀態，可選擇更換其中一個的 key / secret。之後重複詢問 `Add another GitHub App?`。每個 App：
    - App ID 必須是數字（輸入 `Iv...` 時提示那是 Client ID）。
    - Private key 只接受檔案：搜尋 `deploy/` 目錄（不含子目錄）的 `*.pem`。一個時請使用者確認，多個時選編號，沒有時可重新搜尋或輸入路徑。檢查內容含 `PRIVATE KEY-----` 後以 `install -m 400` 複製到 `secrets/github-apps/<App ID>/private-key.pem`，預設刪除原檔。`deploy/*.pem` 已列入 `.gitignore`。

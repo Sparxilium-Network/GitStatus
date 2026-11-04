@@ -7,7 +7,10 @@
 #   optionally starts the service and waits for /health
 #
 # Usage, in the deploy directory:  sudo ./setup.sh
+#                                   sudo ./setup.sh upgrade   (after git pull: no questions)
 # Safe to re-run: press Enter to keep existing values (also fixes permissions).
+# On an existing installation the first question offers "Upgrade": keep every setting, fix
+# permissions and rebuild/restart the service. It does not run git pull.
 set -euo pipefail
 
 SERVICE_UID=10001
@@ -32,6 +35,12 @@ APPS=secrets/github-apps
 LEGACY_KEY=secrets/github-app.pem
 LEGACY_HOOK=secrets/github-webhook-secret
 TOKEN=secrets/discord-token
+MODE=
+case ${1:-} in
+  "") ;;
+  upgrade) MODE=upgrade ;;
+  *) echo "Usage: sudo ./setup.sh [upgrade]" >&2; exit 2 ;;
+esac
 USER_HOME=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6)
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -260,6 +269,15 @@ app_count() {
   find "$APPS" -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' | wc -l
 }
 
+# installed -> exit status 0 when every App and the Discord token are in place
+installed() {
+  local d
+  [ -s "$TOKEN" ] && [ "$(app_count)" -gt 0 ] || return 1
+  for d in "$APPS"/*/; do
+    [ -s "$d/private-key.pem" ] && [ -s "$d/webhook-secret" ] || return 1
+  done
+}
+
 # ---- Upgrade: single-App files from earlier releases ------------------------
 if [ -f "$LEGACY_KEY" ] || [ -f "$LEGACY_HOOK" ]; then
   bold "Moving the GitHub App from the earlier single-App layout"
@@ -277,6 +295,35 @@ if [ -f "$LEGACY_KEY" ] || [ -f "$LEGACY_HOOK" ]; then
   ok "Moved to $APPS/$APP_ID/"
 fi
 
+# ---- Upgrade or setup --------------------------------------------------------
+if installed; then
+  if [ -z "$MODE" ]; then
+    bold "Existing installation found"
+    echo "  GitHub Apps:"
+    list_apps
+    echo "  Discord token: $TOKEN"
+    cat <<'EOF'
+
+    1) Upgrade  keep every setting, fix permissions and rebuild/restart the service
+                (run git pull first; this script does not)
+    2) Setup    review or change the GitHub Apps and the Discord token
+EOF
+    while [ -z "$MODE" ]; do
+      read -rp "  Choose [1]: " choice
+      case ${choice:-1} in
+        1) MODE=upgrade ;;
+        2) MODE=setup ;;
+        *) warn "Type 1 or 2." ;;
+      esac
+    done
+  fi
+elif [ "$MODE" = upgrade ]; then
+  fail "Nothing to upgrade: a GitHub App or the Discord token is missing. Run sudo ./setup.sh without 'upgrade'."
+else
+  MODE=setup
+fi
+
+if [ "$MODE" = setup ]; then
 # ---- 1. GitHub Apps ---------------------------------------------------------
 bold "1/3  GitHub Apps"
 cat <<'EOF'
@@ -324,9 +371,14 @@ if ! keep_existing "$TOKEN" "The Discord token"; then
   unset token
   ok "Saved $TOKEN"
 fi
+fi # MODE=setup
 
 # ---- 3. Ownership and permissions ------------------------------------------
-bold "3/3  Ownership and permissions  (container user uid $SERVICE_UID)"
+if [ "$MODE" = setup ]; then
+  bold "3/3  Ownership and permissions  (container user uid $SERVICE_UID)"
+else
+  bold "Ownership and permissions  (container user uid $SERVICE_UID)"
+fi
 chown -R "$SERVICE_UID:$SERVICE_UID" data secrets
 chmod 700 data
 find secrets -type d -exec chmod 700 {} +
@@ -348,7 +400,7 @@ health() {
 }
 
 echo
-if ! ask_yes "Start (or restart) the service now?" Y; then
+if [ "$MODE" = setup ] && ! ask_yes "Start (or restart) the service now?" Y; then
   echo
   echo "  Start it later with:  docker compose up -d --build --force-recreate"
   exit 0
@@ -359,6 +411,7 @@ for _ in $(seq 1 45); do
   if health; then
     echo
     ok "The service is running."
+    [ "$MODE" = setup ] || exit 0
     echo
     echo "  Next:"
     echo "    - Set up the Cloudflare Tunnel: ../docs/CLOUDFLARE-TUNNEL.md"

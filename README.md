@@ -212,13 +212,24 @@ Webhook secret 不一致。確認 `secrets/github-apps/<App ID>/webhook-secret` 
 
 ## 更新版本
 
-在 `deploy/` 目錄取得新版原始碼，執行設定精靈（會把 `config/config.conf` 升級到新版格式，要保留的項目直接按 Enter），再重新建置並啟動：
+在 `deploy/` 目錄取得新版原始碼，再執行設定精靈：
 
 ```bash
 git pull && sudo ./setup.sh
 ```
 
-精靈最後選擇啟動即可；不想跑精靈時也可以直接 `docker compose up -d --build`，舊格式的設定檔仍可使用，只是 log 會提醒你執行 `setup.sh`。資料庫會自動升級，既有設定都會保留。
+已經安裝過的話，精靈第一步會出現兩個選項：
+
+- **1) Upgrade**（直接按 Enter）：不問任何問題，保留所有設定。它會把 `config/config.conf` 升級到新版格式、修正檔案權限，然後重新建置並重啟服務。
+- **2) Setup**：重新走一次 GitHub App 和 Discord token 的設定，例如要新增 GitHub App 時。
+
+`setup.sh` **不會**幫你執行 `git pull`，記得先拉新版。想完全不用互動的話可以直接執行：
+
+```bash
+git pull && sudo ./setup.sh upgrade
+```
+
+資料庫會在服務啟動時自動升級，既有設定都會保留。
 
 `config/config.conf` 與資料庫都有版本號。如果它們是由更新的版本寫入的（例如更新後又退回舊版），服務會拒絕啟動並說明原因，不會用看不懂的設定繼續執行。
 
