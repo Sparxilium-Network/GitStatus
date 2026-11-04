@@ -157,6 +157,8 @@ Admin TUI 在 Windows 上會開 Swing 終端模擬視窗；在 Linux / Docker �
 
 TUI 畫面是逐行從左上角輸出的純文字（`=====` 分隔線、`>` 游標、`[*]` / `[ ]` 勾選、底部按鍵說明），不使用 Lanterna 的視窗元件，也不依賴終端機回報的畫面大小。透過 SSH 時有些終端機回報的大小不正確，舊版置中視窗會畫在可見範圍外而看起來一片空白。清單超過 15 列時隨游標捲動。
 
+事件設定畫面（`RepoEventsScreen`）把分類也列成一列：分類列的勾選框是 `[*]` 全開、`[-]` 部分、`[ ]` 全關；在分類列按 Space 時，若可開啟的事件還沒全開就全部打開，否則整個分類關閉。無法開啟的事件（權限不足、未訂閱、尚未支援）不會被分類勾選打開。使用者說明在 `docs/ADMIN-TUI.md`。
+
 ## Log
 
 格式由 `application.properties` 的 `logging.pattern.console` / `logging.pattern.file` 設定：

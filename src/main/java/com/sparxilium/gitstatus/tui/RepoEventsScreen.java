@@ -19,12 +19,17 @@ import com.sparxilium.gitstatus.provider.GitProvider;
 import com.sparxilium.gitstatus.provider.GitProvider.Availability;
 
 /**
- * 5.5 Repository event settings: Repository × Event × Destination. Left/Right switches the destination
- * being edited; S saves all destinations in one transaction.
+ * 5.5 Repository event settings: Repository × Event × Destination. Events are listed under their
+ * category; Space on a category turns all of its available events on or off. Left/Right switches the
+ * destination being edited; S saves all destinations in one transaction.
  */
 final class RepoEventsScreen extends Tui.View {
 
-    private static final EventType[] EVENTS = EventType.values();
+    /** A list row: a category heading (event == null) or one event. */
+    private record Row(String category, EventType event) {
+    }
+
+    private static final List<Row> ROWS = buildRows();
 
     private final Tui tui;
     private final ConfigStore store;
@@ -73,6 +78,27 @@ final class RepoEventsScreen extends Tui.View {
         return destinations.get(destIndex);
     }
 
+    private static List<Row> buildRows() {
+        List<Row> rows = new ArrayList<>();
+        String lastCategory = null;
+        for (EventType type : EventType.values()) {
+            if (!type.category().equals(lastCategory)) {
+                rows.add(new Row(type.category(), null));
+                lastCategory = type.category();
+            }
+            rows.add(new Row(type.category(), type));
+        }
+        return List.copyOf(rows);
+    }
+
+    private static List<EventType> eventsIn(String category) {
+        return ROWS.stream().filter(r -> r.event() != null && r.category().equals(category)).map(Row::event).toList();
+    }
+
+    private Availability availability(EventType type) {
+        return capabilities.getOrDefault(type, Availability.UNSUPPORTED);
+    }
+
     @Override
     String title() {
         return "Repository Event Settings";
@@ -94,26 +120,36 @@ final class RepoEventsScreen extends Tui.View {
     List<String> rows() {
         Set<EventType> enabled = pending.get(currentDestination().id());
         List<String> rows = new ArrayList<>();
-        String lastCategory = null;
-        for (EventType type : EVENTS) {
-            String category = type.category().equals(lastCategory) ? "" : type.category();
-            lastCategory = type.category();
-            Availability a = capabilities.getOrDefault(type, Availability.UNSUPPORTED);
-            rows.add(Tui.checkbox(enabled.contains(type)) + Tui.pad(category, 16) + type.label()
-                    + (a == Availability.AVAILABLE ? "" : "   (" + a.reason() + ")"));
+        for (Row row : ROWS) {
+            if (row.event() == null) {
+                List<EventType> events = eventsIn(row.category());
+                long on = events.stream().filter(enabled::contains).count();
+                String box = on == 0 ? "[ ] " : on == events.size() ? "[*] " : "[-] ";
+                boolean anyAvailable = events.stream().anyMatch(e -> availability(e) == Availability.AVAILABLE);
+                rows.add(box + row.category() + (anyAvailable ? "" : "   (" + availability(events.get(0)).reason() + ")"));
+            } else {
+                Availability a = availability(row.event());
+                rows.add("    " + Tui.checkbox(enabled.contains(row.event())) + row.event().label()
+                        + (a == Availability.AVAILABLE ? "" : "   (" + a.reason() + ")"));
+            }
         }
         return rows;
     }
 
     @Override
     String keys() {
-        return "Up/Down Move    Space On/off    Left/Right Switch destination\nS Save    Esc Back";
+        return "Up/Down Move    Space On/off (category: all)    Left/Right Switch destination\nS Save    Esc Back";
     }
 
     @Override
     boolean onKey(KeyStroke key) {
         if (Tui.isSpace(key)) {
-            toggle(EVENTS[cursor]);
+            Row row = ROWS.get(cursor);
+            if (row.event() == null) {
+                toggleCategory(row.category());
+            } else {
+                toggle(row.event());
+            }
             return true;
         }
         if (Tui.isChar(key, 's')) {
@@ -134,7 +170,7 @@ final class RepoEventsScreen extends Tui.View {
 
     private void toggle(EventType type) {
         Set<EventType> set = pending.get(currentDestination().id());
-        Availability a = capabilities.getOrDefault(type, Availability.UNSUPPORTED);
+        Availability a = availability(type);
         if (!set.contains(type) && a != Availability.AVAILABLE) {
             // cannot enable an event the installation cannot deliver; disabling is always allowed
             message = type.label() + ": " + a.reason();
@@ -142,6 +178,24 @@ final class RepoEventsScreen extends Tui.View {
         }
         if (!set.remove(type)) {
             set.add(type);
+        }
+        dirty = true;
+        message = "Unsaved changes";
+    }
+
+    /** Turns every available event of the category on, or all of them off when they are already on. */
+    private void toggleCategory(String category) {
+        Set<EventType> set = pending.get(currentDestination().id());
+        List<EventType> events = eventsIn(category);
+        List<EventType> available = events.stream().filter(e -> availability(e) == Availability.AVAILABLE).toList();
+        if (!available.isEmpty() && !set.containsAll(available)) {
+            set.addAll(available);
+        } else if (events.stream().anyMatch(set::contains)) {
+            events.forEach(set::remove);
+        } else {
+            // nothing to turn on and nothing to turn off
+            message = category + ": " + availability(events.get(0)).reason();
+            return;
         }
         dirty = true;
         message = "Unsaved changes";

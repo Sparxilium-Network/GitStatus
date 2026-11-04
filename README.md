@@ -150,10 +150,12 @@ docker compose exec bot java -jar /app/gitstatus.jar admin
 2. **Git Provider Sources**：按 Space 勾選要通知的 GitHub 帳號或 Organization。
 3. **Repositories / Notification Rules**：選擇帳號後會列出 Repository。
    - 按 **Space** 啟用該 Repository 的通知。
-   - 按 **Enter** 進入事件設定：用 **Left/Right** 切換頻道，**Space** 勾選要通知的事件，最後按 **S** 儲存。
+   - 按 **Enter** 進入事件設定：用 **Left/Right** 切換頻道，**Space** 勾選要通知的事件（在分類那一列按可以一次開關整個分類），最後按 **S** 儲存。
 4. **System Status**：檢查 GitHub、Discord 連線狀態，以及最近一次收到的通知。
 
 設定儲存後約 5 秒內自動生效，不需要重新啟動。設定完選 **Exit** 離開即可。
+
+每個畫面的詳細說明、通知送出的條件，以及沒收到通知時怎麼排查，請看 [設定畫面使用說明](docs/ADMIN-TUI.md)。
 
 ### 修改頻道的通知語言
 
