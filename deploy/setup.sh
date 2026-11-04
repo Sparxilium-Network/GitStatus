@@ -124,7 +124,8 @@ paste_pem() {
 bold "2/5  GitHub App private key"
 cat <<'EOF'
   Where to get it: GitHub -> Settings -> Developer settings -> GitHub Apps -> your app -> Edit
-  -> General -> "Private keys" (bottom of the page) -> "Generate a private key".
+  -> General. Keep scrolling down past "Webhook", "Display information" and "IP allow list"
+  (or press Ctrl+F and search "Private keys") -> "Generate a private key".
   Your browser downloads a file named like:  my-app.2026-11-05.private-key.pem
   The short code listed on that page (SHA256:...) is only a fingerprint, not the key.
 EOF
@@ -173,9 +174,10 @@ fi
 # ---- 3. Webhook secret -----------------------------------------------------
 bold "3/5  GitHub webhook secret"
 cat <<'EOF'
-  The text you typed into "Webhook secret" when creating the GitHub App (GitHub only shows it
-  while you type it). If you do not remember it, leave this empty: a new one is generated and
-  you paste it into the GitHub App -> Edit -> General -> Webhook -> "Webhook secret".
+  The text you typed into "Webhook secret" when creating the GitHub App. GitHub never shows it
+  again (the page only says "There is currently a secret configured"). If you do not remember
+  it, leave this empty: a new one is generated, then in the GitHub App -> Edit -> General ->
+  "Webhook" click "Change secret", paste it and click "Save changes".
 EOF
 if ! keep_existing "$HOOK" "The webhook secret"; then
   while true; do
@@ -187,7 +189,7 @@ if ! keep_existing "$HOOK" "The webhook secret"; then
       echo
       echo "      $secret"
       echo
-      echo "  Paste it into GitHub App settings -> Webhook secret, then click Save changes."
+      echo "  In the GitHub App -> Edit -> General -> Webhook: click \"Change secret\", paste it, click \"Save changes\"."
       read -rp "  Press Enter when done... " _
       break
     fi
